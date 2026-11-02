@@ -58,6 +58,18 @@ Log view, watch real time updates of task runners.
 
 ![Logs View](docs/logs-view.png)
 
+## Gitea Repo Selection
+
+This fork can target repos hosted on a Gitea instance. Set `GITEA_URL` and `GITEA_TOKEN`
+and the dashboard shows a filterable dropdown of every repo the token's user can access
+(own, collaborator and org repos). Pick one before submitting and the task runs against
+that exact repo: the orchestrator clones it directly (no guessing from the prompt) and the
+worker opens its PR on Gitea via the API. Leave the dropdown on "Auto-detect" to keep the
+original GitHub behaviour.
+
+The Gitea token needs read/write access to repositories (`write:repository`) and
+`read:user`/`read:organization` to list repos.
+
 ## Quick Start
 
 ```bash
@@ -72,7 +84,9 @@ services:
     ports:
       - "7334:3000"
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}      # Optional if you only use Gitea
+      - GITEA_URL=${GITEA_URL}            # e.g. https://git.example.com
+      - GITEA_TOKEN=${GITEA_TOKEN}
       - PORT=3000
       - SESSION_SECRET=${SESSION_SECRET}  # Optional: set for consistent sessions across restarts
     volumes:
@@ -106,6 +120,7 @@ Tokens are persisted in `/data/token.json`. Mount a volume to preserve across re
 | `GET /task/:id` | Yes | Get task status |
 | `GET /task/:id/logs` | Yes | Stream task logs |
 | `GET /tasks` | Yes | List all tasks |
+| `GET /api/repos` | Yes | List Gitea repos (`?refresh=1` bypasses 60s cache) |
 | `GET /health` | No | Health check |
 
 ## API
@@ -116,6 +131,12 @@ curl -X POST http://localhost:7334/task \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ccr_your_token_here" \
   -d '{"prompt": "In the acme-api repo, fix the token refresh bug"}'
+
+# Submit a task against a specific Gitea repo
+curl -X POST http://localhost:7334/task \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ccr_your_token_here" \
+  -d '{"prompt": "Fix the token refresh bug", "repo": "owner/acme-api"}'
 
 # Check status
 curl -H "Authorization: Bearer ccr_your_token_here" \
@@ -163,7 +184,8 @@ See [`integrations/clawdbot/SKILL.md`](integrations/clawdbot/SKILL.md) for compl
 
 ## Requirements
 
-- `GITHUB_TOKEN` with repo scope
+- `GITHUB_TOKEN` with repo scope (for GitHub / auto-detect tasks)
+- `GITEA_URL` + `GITEA_TOKEN` (for Gitea repo selection)
 - Claude authentication from your host machine
 
 ### Claude Authentication
