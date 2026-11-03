@@ -1,0 +1,13 @@
+log:
+  level: info
+runner:
+  file: /data/.runner
+  capacity: 1
+  timeout: 1h
+  labels:
+    # :host = jobs run inside this container (which drives the host's Docker), not in a job container
+    - "claude-code-runner:host"
+cache:
+  enabled: false
+host:
+  workdir_parent: /data/workspace

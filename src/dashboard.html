@@ -94,6 +94,27 @@
     .submit-form button:hover { background: #2ea043; }
     .submit-form button:disabled { background: #30363d; cursor: not-allowed; }
 
+    .repo-picker { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .repo-picker input, .repo-picker select {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      padding: 8px;
+      font-size: 14px;
+    }
+    .repo-picker input { flex: 1; min-width: 160px; }
+    .repo-picker select { flex: 2; min-width: 240px; }
+    .repo-picker .refresh-btn {
+      margin-top: 0;
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      padding: 8px 12px;
+    }
+    .repo-picker .refresh-btn:hover { background: #30363d; }
+    .repo-info { color: #8b949e; font-size: 12px; margin-bottom: 12px; min-height: 16px; }
+
     .task-list { margin-top: 20px; }
     .task-list h2 { font-size: 16px; margin-bottom: 12px; color: #8b949e; }
     table {
@@ -213,6 +234,14 @@
 
   <div class="submit-form">
     <h2>Submit New Task</h2>
+    <div id="repo-section" style="display: none;">
+      <div class="repo-picker">
+        <input type="text" id="repo-filter" placeholder="Filter repos..." oninput="renderRepoOptions()">
+        <select id="repo-select" onchange="onRepoChange(true)"></select>
+        <button class="refresh-btn" onclick="fetchRepos(true)" title="Reload repo list">&#x21bb;</button>
+      </div>
+      <div class="repo-info" id="repo-info"></div>
+    </div>
     <textarea id="prompt" placeholder="Enter your task prompt..."></textarea>
     <button id="submit-btn" onclick="submitTask()">Submit Task</button>
   </div>
@@ -246,6 +275,7 @@
       <thead>
         <tr>
           <th>ID</th>
+          <th>Repo</th>
           <th>Prompt</th>
           <th>Status</th>
           <th>Started</th>
@@ -388,11 +418,12 @@
 
         const tbody = document.getElementById('tasks');
         if (tasks.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty">No tasks yet</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="empty">No tasks yet</td></tr>';
         } else {
           tbody.innerHTML = tasks.map(t => `
             <tr>
               <td><code>${t.id}</code></td>
+              <td>${t.repo ? (t.repo_url ? `<a href="${escapeHtml(t.repo_url)}" target="_blank">${escapeHtml(t.repo)}</a>` : escapeHtml(t.repo)) : '<span style="color:#8b949e">auto</span>'}</td>
               <td class="prompt" title="${escapeHtml(t.prompt)}">${escapeHtml(t.prompt.slice(0, 60))}${t.prompt.length > 60 ? '...' : ''}</td>
               <td><span class="status ${t.status}">${t.status}</span></td>
               <td>${new Date(t.started).toLocaleString()}</td>
@@ -413,6 +444,7 @@
     async function submitTask() {
       const prompt = document.getElementById('prompt').value.trim();
       if (!prompt) return alert('Enter a prompt');
+      const repo = document.getElementById('repo-select').value || null;
 
       const btn = document.getElementById('submit-btn');
       btn.disabled = true;
@@ -422,7 +454,7 @@
         const res = await fetch('/task', {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ prompt })
+          body: JSON.stringify(repo ? { prompt, repo } : { prompt })
         });
         const data = await res.json();
         if (data.id) {
@@ -436,6 +468,72 @@
       } finally {
         btn.disabled = false;
         btn.textContent = 'Submit Task';
+      }
+    }
+
+    // ============ Repo Selection (Gitea) ============
+
+    let repos = [];
+
+    async function fetchRepos(refresh = false) {
+      const info = document.getElementById('repo-info');
+      try {
+        const res = await fetch('/api/repos' + (refresh ? '?refresh=1' : ''), { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!data.enabled) return; // Gitea not configured: keep auto-detect-only behaviour
+        document.getElementById('repo-section').style.display = 'block';
+        if (data.error) {
+          info.textContent = 'Failed to load Gitea repos: ' + data.error;
+          return;
+        }
+        repos = data.repos;
+        renderRepoOptions();
+      } catch (e) {
+        info.textContent = 'Failed to load Gitea repos: ' + e.message;
+      }
+    }
+
+    function renderRepoOptions() {
+      const select = document.getElementById('repo-select');
+      const previous = select.value || localStorage.getItem('selected_repo') || '';
+      const filter = document.getElementById('repo-filter').value.trim().toLowerCase();
+      // The selected repo always stays listed, so filtering never silently switches to auto-detect
+      const matches = repos.filter(r => !filter || r.full_name === previous ||
+        r.full_name.toLowerCase().includes(filter) ||
+        r.description.toLowerCase().includes(filter));
+
+      const options = ['<option value="">Auto-detect repo from prompt</option>'];
+      const byOwner = {};
+      matches.forEach(r => (byOwner[r.owner] ||= []).push(r));
+      for (const owner of Object.keys(byOwner).sort()) {
+        options.push(`<optgroup label="${escapeHtml(owner)}">`);
+        for (const r of byOwner[owner]) {
+          const flags = (r.private ? ' 🔒' : '') + (r.archived ? ' (archived)' : '');
+          options.push(`<option value="${escapeHtml(r.full_name)}">${escapeHtml(r.full_name)}${flags}</option>`);
+        }
+        options.push('</optgroup>');
+      }
+      select.innerHTML = options.join('');
+
+      if (previous && matches.some(r => r.full_name === previous)) {
+        select.value = previous;
+      } else if (filter && matches.length === 1) {
+        select.value = matches[0].full_name;
+      }
+      onRepoChange();
+    }
+
+    function onRepoChange(fromUser = false) {
+      const value = document.getElementById('repo-select').value;
+      const info = document.getElementById('repo-info');
+      if (fromUser) localStorage.setItem('selected_repo', value);
+      const repo = repos.find(r => r.full_name === value);
+      if (repo) {
+        info.innerHTML = `<a href="${escapeHtml(repo.html_url)}" target="_blank">${escapeHtml(repo.full_name)}</a>` +
+          ` &middot; base: <code>${escapeHtml(repo.default_branch)}</code>` +
+          (repo.description ? ` &middot; ${escapeHtml(repo.description)}` : '');
+      } else {
+        info.textContent = `${repos.length} Gitea repos available. No repo selected - the orchestrator will pick one of them from your prompt.`;
       }
     }
 
@@ -587,6 +685,7 @@
 
     fetchCurrentUser();
     fetchTokenStatus();
+    fetchRepos();
     fetchTasks();
     setInterval(fetchTasks, 5000);
   </script>

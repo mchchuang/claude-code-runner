@@ -1,11 +1,14 @@
 services:
   claude-runner:
-    image: ericvtheg/claude-code-runner
+    build: .
+    image: claude-code-runner:local
     container_name: claude-code-runner
     ports:
       - "7334:3000"
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITEA_URL=${GITEA_URL:-}
+      - GITEA_TOKEN=${GITEA_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PORT=3000
     volumes:
