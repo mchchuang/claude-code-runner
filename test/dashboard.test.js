@@ -1,6 +1,6 @@
 // Dashboard tests: load the real src/dashboard.html into jsdom, run its inline script against a mocked fetch,
 // and check both the pure helpers (escaping, time formatting, stream-json log parsing, timeline rendering) and
-// the page <-> API flows (task list, task detail, composer, repo picker, API token dialog).
+// the page <-> API flows (task list, task detail, composer, repo picker combobox, API token dialog).
 // Layout and styling (light/dark, narrow widths) are not covered here; those still need a look in a browser.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -855,9 +855,27 @@ describe('repo picker', () => {
   test('lists repos and restores the last picked one', async () => {
     const p = await boot({ routes: { '/api/repos': { enabled: true, repos } }, storage: { selected_repo: 'martin/app' } });
     assert.equal(p.$('repo-row').hidden, false);
-    const opts = [...p.doc.querySelectorAll('#repo-options option')].map(o => [o.value, o.textContent]);
-    assert.deepEqual(opts, [['martin/app', 'The <app>, private'], ['martin/api', 'archived'], ['org/site', '']]);
     assert.equal(p.$('repo').value, 'martin/app');
+    assert.equal(p.$('repo-options').hidden, true);
+    // Opening the list with a repo already picked shows every repo, the pick marked and active
+    p.$('repo-toggle').click();
+    assert.equal(p.$('repo-options').hidden, false);
+    assert.equal(p.$('repo').getAttribute('aria-expanded'), 'true');
+    const opts = [...p.doc.querySelectorAll('#repo-options [role="option"]')].map(o => ({
+      value: o.dataset.value, name: o.querySelector('.opt-name').textContent,
+      tags: [...o.querySelectorAll('.opt-tag')].map(t => t.textContent), desc: o.querySelector('.opt-desc')?.textContent ?? null,
+      selected: o.getAttribute('aria-selected')
+    }));
+    assert.deepEqual(opts, [
+      { value: '', name: 'Any repo', tags: [], desc: 'Claude picks from your prompt', selected: 'false' },
+      { value: 'martin/app', name: 'martin/app', tags: ['private'], desc: 'The <app>', selected: 'true' },
+      { value: 'martin/api', name: 'martin/api', tags: ['archived'], desc: null, selected: 'false' },
+      { value: 'org/site', name: 'org/site', tags: [], desc: null, selected: 'false' }
+    ]);
+    assert.equal(p.doc.querySelector('#repo-options b'), null);
+    assert.equal(p.$('repo').getAttribute('aria-activedescendant'), 'repo-opt-1');
+    p.$('repo-toggle').click();
+    assert.equal(p.$('repo-options').hidden, true);
     assert.match(p.text('repo-hint'), /Branches from main, view repo/);
     assert.equal(p.doc.querySelector('#repo-hint a').href, 'https://git.test/martin/app');
     p.close();
@@ -907,7 +925,135 @@ describe('repo picker', () => {
     p.doc.querySelector('[aria-label="Reload repos"]').click();
     await settle();
     assert.ok(p.calls.some(c => c.path === '/api/repos?refresh=1'));
-    assert.equal(p.doc.querySelectorAll('#repo-options option').length, 3);
+    p.$('repo').click();
+    assert.equal(p.doc.querySelectorAll('#repo-options [role="option"]').length, 4);
+    p.close();
+  });
+
+  test('typing filters the list by name or description, best matches first, with the match marked', async () => {
+    const many = [
+      ...repos,
+      { full_name: 'org/my-app', description: 'Mobile client', default_branch: 'main' },
+      { full_name: 'app/tools', description: '', default_branch: 'main' }
+    ];
+    const p = await boot({ routes: { '/api/repos': { enabled: true, repos: many } } });
+    const type = v => {
+      p.$('repo').value = v;
+      p.$('repo').dispatchEvent(new p.window.Event('input', { bubbles: true }));
+      return [...p.doc.querySelectorAll('#repo-options [role="option"]')].map(o => o.dataset.value);
+    };
+    // "app" as owner/name prefix ranks above a mid-name hit; the "Any repo" row only shows unfiltered
+    assert.deepEqual(type('app'), ['martin/app', 'app/tools', 'org/my-app']);
+    assert.equal(p.$('repo-options').hidden, false);
+    assert.equal(p.doc.querySelector('#repo-opt-0 mark').textContent, 'app');
+    assert.equal(p.$('repo').getAttribute('aria-activedescendant'), 'repo-opt-0');
+    assert.equal(p.text('repo-hint'), '3 matching repos. Pick one from the list.');
+    // Description matches count, and are marked there
+    assert.deepEqual(type('MOBILE'), ['org/my-app']);
+    assert.equal(p.doc.querySelector('#repo-options .opt-desc mark').textContent, 'Mobile');
+    // HTML in typed text or descriptions is escaped
+    assert.deepEqual(type('<app>'), ['martin/app']);
+    assert.equal(p.doc.querySelector('#repo-options .opt-desc').innerHTML, 'The <mark>&lt;app&gt;</mark>');
+    assert.deepEqual(type('nope'), []);
+    assert.equal(p.text('repo-options'), 'No repo matches.');
+    assert.equal(p.$('repo').hasAttribute('aria-activedescendant'), false);
+    // Clearing the text shows everything again, with "Any repo" first
+    assert.deepEqual(type(''), ['', 'martin/app', 'martin/api', 'org/site', 'org/my-app', 'app/tools']);
+    p.close();
+  });
+
+  test('the keyboard opens, moves through, picks from and closes the list', async () => {
+    const p = await boot({ routes: { '/api/repos': { enabled: true, repos } }, });
+    const input = p.$('repo');
+    const key = k => {
+      const e = new p.window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      input.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    const active = () => input.getAttribute('aria-activedescendant');
+    assert.equal(key('ArrowDown'), true);
+    assert.equal(p.$('repo-options').hidden, false);
+    assert.equal(active(), 'repo-opt-0'); // "Any repo" is the current pick
+    key('ArrowDown');
+    key('ArrowDown');
+    assert.equal(active(), 'repo-opt-2');
+    assert.ok(p.$('repo-opt-2').classList.contains('active'));
+    key('ArrowUp');
+    key('ArrowUp');
+    key('ArrowUp'); // wraps to the last one
+    assert.equal(active(), 'repo-opt-3');
+    key('ArrowDown'); // and back to the first
+    assert.equal(active(), 'repo-opt-0');
+    key('ArrowDown');
+    assert.equal(key('Enter'), true);
+    assert.equal(input.value, 'martin/app');
+    assert.equal(p.$('repo-options').hidden, true);
+    assert.equal(input.getAttribute('aria-expanded'), 'false');
+    assert.equal(p.window.localStorage.getItem('selected_repo'), 'martin/app');
+    assert.match(p.text('repo-hint'), /Branches from main/);
+    // Enter with the list closed is left alone (the form handles it)
+    assert.equal(key('Enter'), false);
+    // Typing then Enter picks the best match
+    input.value = 'site';
+    input.dispatchEvent(new p.window.Event('input', { bubbles: true }));
+    key('Enter');
+    assert.equal(input.value, 'org/site');
+    // Escape closes the list without clearing the field
+    key('ArrowDown');
+    assert.equal(key('Escape'), true);
+    assert.equal(p.$('repo-options').hidden, true);
+    assert.equal(input.value, 'org/site');
+    // ArrowUp on a closed list opens it; Enter on "Any repo" clears the pick
+    key('ArrowUp');
+    assert.equal(p.$('repo-options').hidden, false);
+    p.run(`setRepoActive(0)`);
+    key('Enter');
+    assert.equal(input.value, '');
+    assert.equal(p.window.localStorage.getItem('selected_repo'), null);
+    // Arrow keys on an empty result do nothing
+    input.value = 'zzz';
+    input.dispatchEvent(new p.window.Event('input', { bubbles: true }));
+    key('ArrowDown');
+    assert.equal(active(), null);
+    assert.equal(key('Enter'), false);
+    p.close();
+  });
+
+  test('Escape closes the open list first and leaves the open task alone', async () => {
+    const p = await boot({ routes: { '/api/repos': { enabled: true, repos }, '/tasks': [task()], '/task/abc12345/logs': '' }, hash: '#abc12345' });
+    await settle();
+    assert.equal(p.run('selectedId'), 'abc12345');
+    p.$('repo').click();
+    p.$('repo').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.equal(p.$('repo-options').hidden, true);
+    assert.equal(p.run('selectedId'), 'abc12345');
+    p.close();
+  });
+
+  test('clicking an option picks it; blurring the field closes the list', async () => {
+    const p = await boot({ routes: { '/api/repos': { enabled: true, repos } } });
+    p.$('repo').click();
+    // mousedown in the list is cancelled so the field keeps focus
+    const down = new p.window.MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    p.doc.querySelector('#repo-opt-3 .opt-name').dispatchEvent(down);
+    assert.equal(down.defaultPrevented, true);
+    p.doc.querySelector('#repo-opt-3 .opt-name').click();
+    assert.equal(p.$('repo').value, 'org/site');
+    assert.equal(p.$('repo-options').hidden, true);
+    assert.equal(p.window.localStorage.getItem('selected_repo'), 'org/site');
+    // Clicks in the list outside an option do nothing
+    p.$('repo').click();
+    p.$('repo-options').click();
+    assert.equal(p.$('repo-options').hidden, false);
+    p.$('repo').dispatchEvent(new p.window.FocusEvent('blur'));
+    assert.equal(p.$('repo-options').hidden, true);
+    p.close();
+  });
+
+  test('the list does not open when the picker is off', async () => {
+    const p = await boot();
+    p.run('openRepoList()');
+    assert.equal(p.$('repo-options').hidden, true);
     p.close();
   });
 

@@ -93,6 +93,38 @@
 
     .composer { padding: 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
     .repo-row { display: flex; gap: 6px; }
+    /* Repo picker: a combobox, type to filter or open the list to pick */
+    .combo { position: relative; flex: 1; min-width: 0; }
+    .combo .field { padding-right: 34px; }
+    .combo-toggle {
+      position: absolute; top: 1px; right: 1px; width: 32px; height: 32px;
+      display: grid; place-items: center; border: 0; border-radius: 0 6px 6px 0;
+      background: none; color: var(--muted); cursor: pointer;
+    }
+    .combo-toggle:hover { color: var(--ink); }
+    .combo-toggle svg { transition: transform .15s; }
+    .combo.open .combo-toggle svg { transform: rotate(180deg); }
+    .combo-list {
+      position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0;
+      max-height: min(320px, 50vh); overflow-y: auto; overscroll-behavior: contain;
+      list-style: none; padding: 4px;
+      border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+      box-shadow: 0 8px 24px rgb(0 0 0 / .14);
+    }
+    .combo-list[hidden] { display: none; }
+    .combo-list [role="option"] {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: center;
+      padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    }
+    .combo-list [role="option"]:hover, .combo-list [role="option"].active { background: var(--sunken); }
+    .combo-list [aria-selected="true"] .opt-name { color: var(--accent); }
+    .combo-list [aria-selected="true"] .opt-name::after { content: ' \2713'; }
+    .combo-list mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+    .opt-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .opt-tags { display: flex; gap: 4px; }
+    .opt-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; line-height: 16px; }
+    .opt-desc { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .opt-empty { padding: 8px 10px; color: var(--muted); }
     .field {
       width: 100%; height: 34px; padding: 0 10px;
       border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
@@ -296,10 +328,18 @@
     <aside class="side">
       <form class="composer" id="composer" onsubmit="submitTask(event)">
         <div class="repo-row" id="repo-row" hidden>
-          <input class="field" id="repo" list="repo-options" autocomplete="off" spellcheck="false"
-            placeholder="Any repo (Claude picks from your prompt)" aria-label="Repository"
-            oninput="onRepoInput()">
-          <datalist id="repo-options"></datalist>
+          <div class="combo" id="repo-combo">
+            <input class="field" id="repo" role="combobox" aria-autocomplete="list" aria-expanded="false"
+              aria-controls="repo-options" autocomplete="off" spellcheck="false"
+              placeholder="Any repo (Claude picks from your prompt)" aria-label="Repository"
+              oninput="onRepoTyped()" onkeydown="onRepoKey(event)" onclick="openRepoList()" onblur="closeRepoList()">
+            <button type="button" class="combo-toggle" id="repo-toggle" tabindex="-1" aria-label="Show repos"
+              onmousedown="event.preventDefault()" onclick="toggleRepoList()">
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <ul class="combo-list" id="repo-options" role="listbox" aria-label="Repositories" hidden
+              onmousedown="event.preventDefault()" onclick="onRepoOptionClick(event)"></ul>
+          </div>
           <button type="button" class="btn quiet" onclick="fetchRepos(true)" title="Reload repos" aria-label="Reload repos">&#x21bb;</button>
         </div>
         <textarea class="field" id="prompt" placeholder="Describe the change you want" aria-label="Task"></textarea>
@@ -872,10 +912,9 @@
         $('repo-row').hidden = false;
         if (data.error) return setHint('Couldn\'t load your Gitea repos: ' + esc(data.error), true);
         repos = data.repos;
-        $('repo-options').innerHTML = repos.map(r =>
-          `<option value="${esc(r.full_name)}">${esc([r.description, r.private ? 'private' : '', r.archived ? 'archived' : ''].filter(Boolean).join(', '))}</option>`).join('');
         if (!$('repo').value) $('repo').value = store.get('selected_repo');
         onRepoInput();
+        if (repoListOpen) renderRepoList(repoFilter);
       } catch (e) {
         setHint('Couldn\'t load your Gitea repos: ' + esc(e.message), true);
       }
@@ -889,10 +928,132 @@
         const url = safeUrl(repo.html_url);
         setHint(`Branches from <code>${esc(repo.default_branch)}</code>${url ? `, <a href="${esc(url)}" target="_blank" rel="noopener">view repo</a>` : ''}`);
       } else if (value) {
-        const n = repos.filter(r => r.full_name.toLowerCase().includes(value.toLowerCase())).length;
+        const n = repoMatches(value).length;
         setHint(n ? `${n} matching repo${n > 1 ? 's' : ''}. Pick one from the list.` : 'No repo matches.', !n);
       } else {
         setHint(`Claude picks one of your ${repos.length} repos from the prompt.`);
+      }
+    }
+
+    // Repos matching what's typed (name or description), best first: exact name, then name or
+    // owner/name starting with it, then the rest in their original order.
+    function repoMatches(filter) {
+      const q = filter.trim().toLowerCase();
+      if (!q) return repos;
+      const rank = r => {
+        const full = r.full_name.toLowerCase();
+        if (full === q) return 0;
+        if (full.startsWith(q) || full.slice(full.indexOf('/') + 1).startsWith(q)) return 1;
+        return full.includes(q) ? 2 : 3;
+      };
+      return repos
+        .filter(r => r.full_name.toLowerCase().includes(q) || (r.description || '').toLowerCase().includes(q))
+        .map(r => [rank(r), r]).sort((a, b) => a[0] - b[0]).map(([, r]) => r);
+    }
+
+    // Escaped text with the first case-insensitive match of q wrapped in <mark>
+    function markMatch(text, q) {
+      text = String(text ?? '');
+      const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+      if (i < 0) return esc(text);
+      return esc(text.slice(0, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length));
+    }
+
+    let repoListOpen = false;
+    let repoFilter = '';
+    let repoShown = []; // options in the open list: a repo, or null for "Any repo"
+    let repoActive = -1;
+
+    function renderRepoList(filter) {
+      repoFilter = filter.trim();
+      repoShown = repoFilter ? repoMatches(repoFilter) : [null, ...repos];
+      const current = $('repo').value.trim();
+      $('repo-options').innerHTML = repoShown.length ? repoShown.map((r, i) => {
+        if (!r) {
+          return `<li role="option" id="repo-opt-${i}" data-value="" aria-selected="${!current}">
+            <span class="opt-name">Any repo</span><span class="opt-desc">Claude picks from your prompt</span></li>`;
+        }
+        const tags = [r.private && 'private', r.archived && 'archived'].filter(Boolean);
+        return `<li role="option" id="repo-opt-${i}" data-value="${esc(r.full_name)}" aria-selected="${r.full_name === current}">
+          <span class="opt-name">${markMatch(r.full_name, repoFilter)}</span>
+          <span class="opt-tags">${tags.map(t => `<span class="opt-tag">${t}</span>`).join('')}</span>
+          ${r.description ? `<span class="opt-desc">${markMatch(r.description, repoFilter)}</span>` : ''}</li>`;
+      }).join('') : '<li class="opt-empty">No repo matches.</li>';
+      const picked = repoShown.findIndex(r => (r ? r.full_name : '') === current);
+      setRepoActive(picked >= 0 ? picked : repoFilter && repoShown.length ? 0 : -1);
+    }
+
+    function setRepoActive(i) {
+      repoActive = i;
+      const input = $('repo');
+      $('repo-options').querySelectorAll('[role="option"]').forEach((el, j) => el.classList.toggle('active', j === i));
+      const el = i >= 0 ? $('repo-opt-' + i) : null;
+      if (el) {
+        input.setAttribute('aria-activedescendant', el.id);
+        el.scrollIntoView?.({ block: 'nearest' });
+      } else {
+        input.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    // Opening from a click shows every repo when the field already holds a pick; otherwise it filters
+    function openRepoList(typed = false) {
+      if (!reposEnabled) return;
+      const value = $('repo').value.trim();
+      renderRepoList(typed || !repos.some(r => r.full_name === value) ? value : '');
+      repoListOpen = true;
+      $('repo-options').hidden = false;
+      $('repo-combo').classList.add('open');
+      $('repo').setAttribute('aria-expanded', 'true');
+    }
+
+    function closeRepoList() {
+      if (!repoListOpen) return;
+      repoListOpen = false;
+      $('repo-options').hidden = true;
+      $('repo-combo').classList.remove('open');
+      $('repo').setAttribute('aria-expanded', 'false');
+      $('repo').removeAttribute('aria-activedescendant');
+    }
+
+    function toggleRepoList() {
+      if (repoListOpen) return closeRepoList();
+      $('repo').focus();
+      openRepoList();
+    }
+
+    function pickRepo(value) {
+      $('repo').value = value;
+      closeRepoList();
+      onRepoInput();
+    }
+
+    function onRepoTyped() {
+      openRepoList(true);
+      onRepoInput();
+    }
+
+    function onRepoOptionClick(e) {
+      const opt = e.target.closest('[role="option"]');
+      if (opt) pickRepo(opt.dataset.value);
+    }
+
+    function onRepoKey(e) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!repoListOpen) return openRepoList();
+        const n = repoShown.length;
+        if (!n) return;
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        setRepoActive(repoActive < 0 ? (step > 0 ? 0 : n - 1) : (repoActive + step + n) % n);
+      } else if (e.key === 'Enter' && repoListOpen && repoActive >= 0) {
+        e.preventDefault();
+        const r = repoShown[repoActive];
+        pickRepo(r ? r.full_name : '');
+      } else if (e.key === 'Escape' && repoListOpen) {
+        e.preventDefault();
+        e.stopPropagation(); // don't also close the open task
+        closeRepoList();
       }
     }
 
