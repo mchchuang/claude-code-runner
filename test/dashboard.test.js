@@ -642,20 +642,40 @@ describe('task detail', () => {
     p.close();
   });
 
-  test('the status row with the PR button stays pinned to the top of the scrolling detail pane', async () => {
-    const t = task({ pr_url: 'https://git.test/pr/7' });
+  test('the whole top part (status, PR button, title, repo, branch, timing) stays pinned', async () => {
+    const t = task({ pr_url: 'https://git.test/pr/7', prompt: 'Title\nMore detail' });
     const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': LOG } });
     p.run(`selectTask('abc12345')`);
     await settle();
-    const row = p.$('detail-head').querySelector('.head-row');
-    assert.ok(row.querySelector('a.btn.primary'));
-    const css = p.window.getComputedStyle(row);
+    const top = p.$('detail-head').querySelector('.detail-top');
+    assert.ok(top.querySelector('.head-row .status'));
+    assert.ok(top.querySelector('a.btn.primary'));
+    assert.equal(top.querySelector('h1').textContent, 'Title');
+    assert.ok(top.querySelector('.prompt-more'));
+    const facts = top.querySelector('.facts').textContent;
+    for (const label of ['Repo', 'Branch', 'Started', 'Took']) assert.match(facts, new RegExp(label));
+    const css = p.window.getComputedStyle(top);
     assert.equal(css.position, 'sticky');
     assert.equal(css.top, '0px');
+    // The row itself is no longer sticky on its own; the whole block is.
+    assert.notEqual(p.window.getComputedStyle(top.querySelector('.head-row')).position, 'sticky');
+    // A long prompt scrolls inside its box instead of making the pinned part tall.
+    assert.equal(p.window.getComputedStyle(top.querySelector('.prompt-more')).overflowY, 'auto');
     // A sticky box can't leave its parent's box: #detail-head must not generate one, so the
-    // row is bounded by .detail-inner (which also holds the timeline) and stays pinned.
+    // block is bounded by .detail-inner (which also holds the timeline) and stays pinned.
     assert.equal(p.window.getComputedStyle(p.$('detail-head')).display, 'contents');
     assert.ok(p.$('detail-head').parentElement.contains(p.$('timeline')));
+    p.close();
+  });
+
+  test('the failure box sits below the pinned top part, not inside it', async () => {
+    const t = task({ status: 'failed', errorType: 'timeout' });
+    const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': LOG } });
+    p.run(`selectTask('abc12345')`);
+    await settle();
+    const head = p.$('detail-head');
+    assert.ok(head.querySelector('.problem'));
+    assert.equal(head.querySelector('.detail-top .problem'), null);
     p.close();
   });
 

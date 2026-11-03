@@ -170,14 +170,17 @@
     .facts { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted); font-size: 13px; margin: 14px 0 0; }
     .facts dt { display: inline; }
     .facts dd { display: inline; color: var(--ink); margin-left: 6px; }
-    /* #detail-head generates no box, so the sticky .head-row is bounded by .detail-inner and
-       stays pinned while the timeline scrolls, keeping "Open pull request" in reach. */
+    /* #detail-head generates no box, so the sticky .detail-top (status, PR button, title, repo,
+       branch and timing) is bounded by .detail-inner and stays pinned while the timeline scrolls.
+       A long prompt scrolls inside its own box so the pinned part stays short. */
     #detail-head { display: contents; }
-    .head-row {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    .detail-top {
       position: sticky; top: 0; z-index: 2;
-      margin: 0 -8px; padding: 8px; background: var(--bg);
+      margin: 0 -8px; padding: 8px 8px 12px; background: var(--bg);
+      border-bottom: 1px solid var(--line);
     }
+    .detail-top .prompt-more { max-height: 7.5em; overflow-y: auto; }
+    .head-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .head-row .push { margin-left: auto; }
     .archived-tag { color: var(--muted); font-size: 12.5px; }
     .problem { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--fail-soft); color: var(--fail); }
@@ -675,6 +678,7 @@
       const repoUrl = safeUrl(t.repo_url);
       const ended = t.finished ? new Date(t.finished) : new Date();
       head.innerHTML = `
+        <div class="detail-top">
         <div class="head-row">
           <span class="status ${esc(t.status)}"><span class="dot"></span>${esc(STATUS_LABEL[t.status] || t.status)}</span>
           ${t.archived ? '<span class="archived-tag">Archived</span>' : ''}
@@ -690,6 +694,7 @@
           <div><dt>Started</dt><dd title="${esc(new Date(t.started).toLocaleString())}">${ago(t.started)}</dd></div>
           <div><dt>${t.finished ? 'Took' : 'Running for'}</dt><dd>${span(ended - new Date(t.started))}</dd></div>
         </dl>
+        </div>
         ${t.status === 'failed' ? `<div class="problem">
           <p>${esc(ERROR_HELP[t.errorType] || 'The task failed.')}</p>
           ${t.error ? `<p>${esc(t.error)}</p>` : ''}
