@@ -63,8 +63,6 @@ Containerized service that accepts task prompts via HTTP, uses Claude to identif
 - `PORT` - Optional, defaults to 3000
 - Claude OAuth credentials mounted read-only at `/home/node/.claude/.credentials.json` (debug logs stay in container)
 
-## Git Conventions
+## Workflow, commits, tests and CI
 
-Uses Conventional Commits enforced by commitlint + husky. Format: `type: description`
-
-Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`
+@AGENTS.md
