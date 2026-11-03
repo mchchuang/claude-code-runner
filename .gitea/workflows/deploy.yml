@@ -42,7 +42,9 @@ jobs:
           image="$registry/$(echo '${{ gitea.repository }}' | tr '[:upper:]' '[:lower:]')"
           echo "REGISTRY=$registry" >> "$GITHUB_ENV"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
-          docker build --pull -t "$image:${{ gitea.sha }}" -t "$image:latest" .
+          # --no-cache: the Dockerfile's "npm install -g @anthropic-ai/claude-code" line never changes, so a cached
+          # layer would pin an old Claude Code (and miss new models) forever
+          docker build --pull --no-cache -t "$image:${{ gitea.sha }}" -t "$image:latest" .
 
       - name: Push to the Gitea registry
         # REGISTRY_TOKEN (a token with write:package) is only needed if the job token can't push packages.
