@@ -63,6 +63,7 @@ Containerized service that accepts task prompts via HTTP, uses Claude to identif
 - `GITHUB_TOKEN` - Needed for GitHub tasks (auto-detect when Gitea is not configured), repo/read:org/workflow scopes
 - `GITEA_URL` / `GITEA_TOKEN` - Optional; enables `GET /api/repos` and the dashboard repo picker. `POST /task` accepts `repo: "owner/name"` to target a Gitea repo directly (orchestrator clones it, worker opens PR via Gitea API). Without `repo`, auto-detect searches Gitea, and the server resolves the cloned repo from its origin URL (`resolveGiteaRepoFromClone`) before starting the worker. Git credentials for `GITEA_URL` are configured at startup via a credential helper reading `$GITEA_TOKEN`
 - `PORT` - Optional, defaults to 3000
+- `SESSION_SECRET` - Optional. Dashboard logins persist across restarts/redeploys: `src/session-store.js` keeps sessions in `$DATA_DIR/sessions.json` and, when `SESSION_SECRET` is unset, a generated secret in `$DATA_DIR/session-secret` (`DATA_DIR` defaults to `/data`, a volume)
 - Claude OAuth credentials mounted read-only at `/home/node/.claude/.credentials.json` (debug logs stay in container)
 
 ## Workflow, commits, tests and CI
