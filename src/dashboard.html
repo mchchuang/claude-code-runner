@@ -664,7 +664,8 @@
       auth_expired: 'Claude\'s login on the server has expired. Log in again on the server, then rerun the task.',
       capacity_reached: 'Claude hit its usage limit. Try again later.',
       timeout: 'The task ran longer than 1 hour and was stopped.',
-      exit_code: 'Claude stopped with an error. The run below shows the last steps.'
+      exit_code: 'Claude stopped with an error. The run below shows the last steps.',
+      interrupted: 'The runner restarted (for example a redeploy) while this task was running, so it was stopped. Check its branch for pushed work, or rerun it.'
     };
 
     function renderHeader() {
@@ -807,7 +808,7 @@
       let text;
       try {
         const res = await api('/task/' + encodeURIComponent(id) + '/logs');
-        if (!res.ok) throw new Error(res.status === 404 ? 'This task no longer exists.' : 'HTTP ' + res.status);
+        if (!res.ok) throw new Error(res.status !== 404 ? 'HTTP ' + res.status : task ? 'Its log is no longer available.' : 'This task no longer exists.');
         text = await res.text();
       } catch (e) {
         if (id === selectedId && $('timeline')) $('timeline').innerHTML = `<div class="problem"><p>Couldn't load this run: ${esc(e.message)}</p></div>`;

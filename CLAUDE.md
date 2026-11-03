@@ -45,7 +45,9 @@ Containerized service that accepts task prompts via HTTP, uses Claude to identif
 - `src/server.js` - Express server, task orchestration, system prompts for orchestrator and worker
 - `src/dashboard.html` - Vanilla JS monitoring UI with 5s auto-refresh
 
-**Task actions:** each task in the dashboard has a `…` menu to archive or delete it. `PATCH /task/:id` with `{ "archived": true|false }` flags a task (archived tasks are hidden behind "Show archived" and left out of the counts); `DELETE /task/:id` removes it, stops its `claude` process if it is still running and deletes its work dir (log and clone). Branches and PRs are left alone. Tasks still live in memory, so both reset on restart.
+**Task actions:** each task in the dashboard has a `…` menu to archive or delete it. `PATCH /task/:id` with `{ "archived": true|false }` flags a task (archived tasks are hidden behind "Show archived" and left out of the counts); `DELETE /task/:id` removes it, stops its `claude` process if it is still running and deletes its log and work dir (clone). Branches and PRs are left alone.
+
+**Task history:** `src/task-store.js` keeps the task list in `$DATA_DIR/tasks.json` (rewritten on every change) and logs go to `$DATA_DIR/logs/<id>.log`, so history, archive flags and logs survive restarts and redeploys. Clones stay in `WORK_DIR` (`/tmp/work`, not a volume) and are lost on redeploy. A task still `running` when the server stops can't resume (its `claude` process died), so on startup it is marked `failed` with errorType `interrupted`.
 
 **Worker Constraints (defined in `getWorkerSystemPrompt`):**
 - Never use `AskUserQuestion` (hangs forever)
@@ -60,6 +62,7 @@ Containerized service that accepts task prompts via HTTP, uses Claude to identif
 | capacity_reached | Claude rate limited / at capacity     |
 | timeout          | Task exceeded 1 hour                  |
 | exit_code        | Process exited non-zero (check logs)  |
+| interrupted      | Runner restarted mid-task (redeploy)  |
 
 **Environment:**
 - `GITHUB_TOKEN` - Needed for GitHub tasks (auto-detect when Gitea is not configured), repo/read:org/workflow scopes

@@ -703,6 +703,25 @@ describe('task detail', () => {
     p.close();
   });
 
+  test('an existing task whose log 404s says the log is gone, not the task', async () => {
+    const p = await boot({ routes: { '/tasks': [task()], '/task/abc12345/logs': { status: 404, body: '{}' } } });
+    p.run(`selectTask('abc12345')`);
+    await settle();
+    assert.match(p.text('timeline'), /Couldn't load this run: Its log is no longer available\./);
+    p.close();
+  });
+
+  test('a task cut short by a restart explains what happened', async () => {
+    const t = task({ status: 'failed', errorType: 'interrupted', error: 'The runner restarted while this task was running.' });
+    const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': LOG } });
+    p.run(`selectTask('abc12345')`);
+    await settle();
+    const problem = p.$('detail-head').querySelector('.problem').textContent;
+    assert.match(problem, /runner restarted \(for example a redeploy\)/);
+    assert.doesNotMatch(problem, /The task failed\./);
+    p.close();
+  });
+
   test('other log errors show the HTTP status', async () => {
     const p = await boot({ routes: { '/tasks': [task()], '/task/abc12345/logs': { status: 500, body: 'x' } } });
     p.run(`selectTask('abc12345')`);

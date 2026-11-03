@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { FileSessionStore, loadSessionSecret } from './session-store.js';
+import { TaskStore } from './task-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -130,10 +131,14 @@ async function requireAuth(req, res, next) {
 // Apply auth middleware to all routes except static assets
 app.use(requireAuth);
 
-const tasks = new Map();
+// Clones live in WORK_DIR (scratch space, lost on redeploy). The task list and the logs live in DATA_DIR, a volume,
+// so the dashboard keeps its history across restarts and redeploys.
+const WORK_DIR = process.env.WORK_DIR || '/tmp/work';
+const LOG_DIR = path.join(DATA_DIR, 'logs');
+const taskLog = id => path.join(LOG_DIR, `${id}.log`);
+const tasks = new TaskStore(path.join(DATA_DIR, 'tasks.json'), { logFile: taskLog });
 // Live `claude` processes by task id, so deleting a running task can stop it
 const procs = new Map();
-const WORK_DIR = process.env.WORK_DIR || '/tmp/work';
 const TASK_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
 // ============ Gitea Integration ============
@@ -484,14 +489,14 @@ app.post('/task', async (req, res) => {
   const taskDir = path.join(WORK_DIR, id);
 
   await mkdir(taskDir, { recursive: true });
+  await mkdir(LOG_DIR, { recursive: true });
 
   tasks.set(id, {
     status: 'running',
     prompt,
     repo: repo?.full_name || null,
     repo_url: repo?.html_url || null,
-    started: new Date().toISOString(),
-    logFile: path.join(taskDir, 'output.log')
+    started: new Date().toISOString()
   });
 
   runTask(id, prompt, taskDir, repo).catch(err => {
@@ -501,6 +506,9 @@ app.post('/task', async (req, res) => {
       errorType: err.errorType || 'unknown',
       finished: new Date().toISOString()
     });
+  }).finally(() => {
+    // Deleted while running: the run may have written to the log after DELETE removed it
+    if (!tasks.has(id)) return rm(taskLog(id), { force: true }).catch(() => {});
   });
 
   res.json({ id, status: 'queued' });
@@ -530,6 +538,7 @@ app.delete('/task/:id', async (req, res) => {
   procs.get(id)?.kill();
   procs.delete(id);
   await rm(path.join(WORK_DIR, id), { recursive: true, force: true }).catch(() => {});
+  await rm(taskLog(id), { force: true }).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -537,8 +546,17 @@ app.get('/task/:id/logs', async (req, res) => {
   const task = tasks.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
 
-  res.setHeader('Content-Type', 'text/plain');
-  createReadStream(task.logFile).pipe(res);
+  // The log is missing if the task was just created (not written yet) or its file was removed
+  const stream = createReadStream(taskLog(req.params.id));
+  stream.on('open', () => {
+    res.setHeader('Content-Type', 'text/plain');
+    stream.pipe(res);
+  });
+  stream.on('error', () => {
+    if (res.headersSent) return res.end();
+    if (task.status === 'running') return res.type('text/plain').send('');
+    res.status(404).json({ error: 'Log not found' });
+  });
 });
 
 // List Gitea repos available for task submission
@@ -587,7 +605,7 @@ function updateTask(id, patch) {
 }
 
 async function runTask(id, prompt, taskDir, repo) {
-  const logFile = path.join(taskDir, 'output.log');
+  const logFile = taskLog(id);
   const repoDir = path.join(taskDir, 'repo');
   const branchName = `claude/${id}`;
 

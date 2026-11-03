@@ -349,7 +349,7 @@ describe('with Gitea', () => {
       assert.ok(log.includes(marker), marker);
     }
     assert.equal(existsSync(path.join(runner.workDir, task.id, 'repo')), false, 'clone removed after success');
-    assert.ok(existsSync(path.join(runner.workDir, task.id, 'output.log')), 'log kept');
+    assert.ok(existsSync(path.join(runner.dataDir, 'logs', `${task.id}.log`)), 'log kept in the data dir');
   });
 
   test('auto-detect resolves the cloned repo from its origin', async () => {
@@ -410,6 +410,7 @@ describe('with Gitea', () => {
     assert.equal((await runner.request('GET', `/task/${created.id}/logs`)).status, 404);
     assert.ok(!(await runner.request('GET', '/tasks')).json.some(t => t.id === created.id));
     assert.equal(existsSync(path.join(runner.workDir, created.id)), false);
+    assert.equal(existsSync(path.join(runner.dataDir, 'logs', `${created.id}.log`)), false);
     assert.equal((await runner.request('DELETE', `/task/${created.id}`)).status, 404, 'second delete');
   });
 
@@ -422,8 +423,83 @@ describe('with Gitea', () => {
     await new Promise(r => setTimeout(r, 500)); // the killed run winds down
     assert.equal((await runner.request('GET', `/task/${created.id}`)).status, 404, 'not re-created by the failing run');
     assert.equal(existsSync(path.join(runner.workDir, created.id)), false);
+    assert.equal(existsSync(path.join(runner.dataDir, 'logs', `${created.id}.log`)), false, 'no log left by the dying run');
     const health = (await runner.request('GET', '/health')).json;
     assert.equal(health.running, 0);
     assert.doesNotMatch(runner.output(), /Unhandled|ENOENT/);
+  });
+});
+
+describe('tasks across restarts', () => {
+  let runner;
+  let gitea;
+  const ids = {};
+  before(async () => {
+    gitea = await mockGitea();
+    runner = await startRunner({ GITEA_URL: `${gitea.url}/`, GITEA_TOKEN });
+    await setUp(runner);
+  });
+  after(() => { runner.stop(); gitea.server.close(); });
+
+  const restart = async () => {
+    await runner.kill();
+    rmSync(runner.workDir, { recursive: true, force: true }); // a redeploy starts with a fresh container filesystem
+    runner = await startRunner({ GITEA_URL: `${gitea.url}/`, GITEA_TOKEN }, { tmp: runner.tmp });
+    assert.equal((await runner.request('POST', '/api/login', { body: { username: 'martin', password: 'correct horse' } })).status, 200);
+  };
+
+  test('finished tasks, their logs and archive flags survive a redeploy; running ones are marked interrupted', async () => {
+    ids.done = (await runner.request('POST', '/task', { body: { prompt: 'Keep me', repo: 'martin/repo-3' } })).json.id;
+    ids.failed = (await runner.request('POST', '/task', { body: { prompt: 'FAIL_WORKER', repo: 'martin/repo-2' } })).json.id;
+    const done = await waitForTask(runner, ids.done);
+    await waitForTask(runner, ids.failed);
+    await runner.request('PATCH', `/task/${ids.failed}`, { body: { archived: true } });
+    ids.hung = (await runner.request('POST', '/task', { body: { prompt: 'HANG_ORCHESTRATOR', repo: 'martin/repo-6' } })).json.id;
+    await new Promise(r => setTimeout(r, 300)); // let the orchestrator start
+    const before = (await runner.request('GET', '/tasks')).json;
+
+    await restart();
+
+    const list = (await runner.request('GET', '/tasks')).json;
+    assert.deepEqual(list.map(t => t.id), before.map(t => t.id), 'same tasks, same order');
+    assert.deepEqual(list.find(t => t.id === ids.done), done, 'completed task unchanged');
+    assert.equal(list.find(t => t.id === ids.failed).archived, true);
+    assert.equal(list.find(t => t.id === ids.failed).errorType, 'exit_code');
+
+    const hung = list.find(t => t.id === ids.hung);
+    assert.equal(hung.status, 'failed');
+    assert.equal(hung.errorType, 'interrupted');
+    assert.ok(hung.finished);
+    assert.equal((await runner.request('GET', '/health')).json.running, 0);
+
+    const log = await runner.request('GET', `/task/${ids.done}/logs`);
+    assert.equal(log.status, 200);
+    assert.ok(log.text.includes('WORKER COMPLETE'), 'log readable after the redeploy');
+  });
+
+  test('tasks can still be archived and deleted after a restart, and deletes stick', async () => {
+    assert.equal((await runner.request('PATCH', `/task/${ids.done}`, { body: { archived: true } })).json.archived, true);
+    assert.equal((await runner.request('DELETE', `/task/${ids.hung}`)).status, 200);
+    assert.equal(existsSync(path.join(runner.dataDir, 'logs', `${ids.hung}.log`)), false);
+    await restart();
+    const list = (await runner.request('GET', '/tasks')).json;
+    assert.equal(list.some(t => t.id === ids.hung), false, 'deleted task stays deleted');
+    assert.equal(list.find(t => t.id === ids.done).archived, true);
+  });
+
+  test('a task whose log file is gone answers 404 instead of crashing the server', async () => {
+    rmSync(path.join(runner.dataDir, 'logs', `${ids.failed}.log`));
+    const res = await runner.request('GET', `/task/${ids.failed}/logs`);
+    assert.equal(res.status, 404);
+    assert.equal(res.json.error, 'Log not found');
+    assert.equal((await runner.request('GET', '/health')).status, 200, 'server still up');
+  });
+
+  test('a corrupt tasks file starts an empty list instead of failing to boot', async () => {
+    await runner.kill();
+    writeFileSync(path.join(runner.dataDir, 'tasks.json'), '{oops');
+    runner = await startRunner({ GITEA_URL: `${gitea.url}/`, GITEA_TOKEN }, { tmp: runner.tmp });
+    assert.equal((await runner.request('POST', '/api/login', { body: { username: 'martin', password: 'correct horse' } })).status, 200);
+    assert.deepEqual((await runner.request('GET', '/tasks')).json, []);
   });
 });
