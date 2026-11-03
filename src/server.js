@@ -131,6 +131,8 @@ async function requireAuth(req, res, next) {
 app.use(requireAuth);
 
 const tasks = new Map();
+// Live `claude` processes by task id, so deleting a running task can stop it
+const procs = new Map();
 const WORK_DIR = process.env.WORK_DIR || '/tmp/work';
 const TASK_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
@@ -493,8 +495,7 @@ app.post('/task', async (req, res) => {
   });
 
   runTask(id, prompt, taskDir, repo).catch(err => {
-    tasks.set(id, {
-      ...tasks.get(id),
+    updateTask(id, {
       status: 'failed',
       error: err.message,
       errorType: err.errorType || 'unknown',
@@ -509,6 +510,27 @@ app.get('/task/:id', (req, res) => {
   const task = tasks.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
   res.json({ id: req.params.id, ...task });
+});
+
+// Archive or unarchive a task: archived tasks are hidden from the dashboard list by default
+app.patch('/task/:id', (req, res) => {
+  const task = tasks.get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  const { archived } = req.body || {};
+  if (typeof archived !== 'boolean') return res.status(400).json({ error: 'archived must be true or false' });
+  updateTask(req.params.id, { archived });
+  res.json({ id: req.params.id, ...tasks.get(req.params.id) });
+});
+
+// Delete a task: stops it if it is still running and removes its log and clone
+app.delete('/task/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!tasks.has(id)) return res.status(404).json({ error: 'Not found' });
+  tasks.delete(id);
+  procs.get(id)?.kill();
+  procs.delete(id);
+  await rm(path.join(WORK_DIR, id), { recursive: true, force: true }).catch(() => {});
+  res.json({ ok: true });
 });
 
 app.get('/task/:id/logs', async (req, res) => {
@@ -558,6 +580,12 @@ app.get('/', async (_req, res) => {
   res.send(html);
 });
 
+// Merge `patch` into a task, unless the task was deleted meanwhile (its run may still be winding down)
+function updateTask(id, patch) {
+  const task = tasks.get(id);
+  if (task) tasks.set(id, { ...task, ...patch });
+}
+
 async function runTask(id, prompt, taskDir, repo) {
   const logFile = path.join(taskDir, 'output.log');
   const repoDir = path.join(taskDir, 'repo');
@@ -576,13 +604,16 @@ async function runTask(id, prompt, taskDir, repo) {
   if (!repo && giteaEnabled) {
     try {
       repo = await resolveGiteaRepoFromClone(repoDir);
-      tasks.set(id, { ...tasks.get(id), repo: repo.full_name, repo_url: repo.html_url });
+      updateTask(id, { repo: repo.full_name, repo_url: repo.html_url });
       await appendFile(logFile, `Repo (auto-detected): ${repo.full_name}\n\n`);
     } catch (err) {
       // Not a Gitea clone: worker falls back to the GitHub PR flow
       await appendFile(logFile, `Could not resolve Gitea repo from clone: ${err.message}\n\n`);
     }
   }
+
+  // Deleted during setup: don't start the worker
+  if (!tasks.has(id)) return;
 
   // Phase 2: Worker - run in cloned repo
   await appendFile(logFile, `=== WORKER PHASE ===\n`);
@@ -594,6 +625,7 @@ async function runTask(id, prompt, taskDir, repo) {
 
 async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
+  logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
   const fullPrompt = getOrchestratorPrompt(prompt, taskDir, branchName, repo);
 
   return new Promise((resolve, reject) => {
@@ -619,6 +651,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
       reject(err);
     }, 20 * 60 * 1000); // 20 min timeout for orchestrator (includes env setup)
 
+    procs.set(id, proc);
     console.log(`[${id}] Orchestrator PTY spawned, pid: ${proc.pid}`);
 
     proc.onData(data => logStream.write(data));
@@ -626,6 +659,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
       logStream.end();
+      if (procs.get(id) === proc) procs.delete(id);
 
       if (exitCode !== 0) {
         return reject(Object.assign(new Error(`Orchestrator exited with code ${exitCode}`), { errorType: 'exit_code' }));
@@ -639,6 +673,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
 
 async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
+  logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
   const systemPrompt = getWorkerSystemPrompt(branchName, repo);
 
   return new Promise((resolve, reject) => {
@@ -667,6 +702,7 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
 
     let output = '';
 
+    procs.set(id, proc);
     console.log(`[${id}] Worker PTY spawned in ${repoDir}, pid: ${proc.pid}`);
 
     proc.onData(data => {
@@ -677,6 +713,7 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
       logStream.end();
+      if (procs.get(id) === proc) procs.delete(id);
 
       // Parse PR URL from worker output (Gitea uses /pulls/N, GitHub uses /pull/N)
       // Gitea builds html_url from its ROOT_URL, which can differ from GITEA_URL, so anchor on the repo's own URL
@@ -687,9 +724,7 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
       const prUrls = output.match(prPattern) || [];
       const prMatch = prUrls.length ? [prUrls[prUrls.length - 1]] : null;
 
-      const task = tasks.get(id);
-      tasks.set(id, {
-        ...task,
+      updateTask(id, {
         status: exitCode === 0 ? 'completed' : 'failed',
         pr_url: prMatch?.[0] || null,
         errorType: exitCode === 0 ? null : 'exit_code',
@@ -697,7 +732,7 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
       });
 
       // Cleanup cloned repo on success (keep logs)
-      if (exitCode === 0) {
+      if (exitCode === 0 && tasks.has(id)) {
         await rm(repoDir, { recursive: true, force: true }).catch(() => {});
       }
 

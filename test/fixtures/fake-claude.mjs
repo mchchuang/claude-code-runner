@@ -1,6 +1,7 @@
 // Stand-in for the `claude` CLI in tests. The server runs it twice per task through node-pty:
 // the orchestrator (prompt only) and the worker (with --system-prompt). It prints stream-json lines like the
-// real CLI. Prompts containing FAIL_ORCHESTRATOR or FAIL_WORKER make that phase exit non-zero.
+// real CLI. Prompts containing FAIL_ORCHESTRATOR or FAIL_WORKER make that phase exit non-zero; HANG_ORCHESTRATOR
+// keeps the orchestrator running until it is killed.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -16,12 +17,16 @@ emit({ type: 'system', subtype: 'init', model: 'fake-claude', tools: [], mcp_ser
 if (systemPrompt === null) {
   // Orchestrator: "clone" the repo by creating it with the right origin, like `git clone` would
   if (prompt.includes('FAIL_ORCHESTRATOR')) process.exit(1);
-  const cloneUrl = prompt.match(/^Clone URL: (\S+)$/m)?.[1] || process.env.FAKE_AUTO_CLONE_URL;
-  const repoDir = path.join(process.cwd(), 'repo');
-  mkdirSync(repoDir, { recursive: true });
-  execFileSync('git', ['init', '-q', repoDir]);
-  execFileSync('git', ['-C', repoDir, 'remote', 'add', 'origin', cloneUrl]);
-  emit({ type: 'result', subtype: 'success', result: 'Environment ready', duration_ms: 10, total_cost_usd: 0.01 });
+  if (prompt.includes('HANG_ORCHESTRATOR')) {
+    setInterval(() => {}, 1000); // runs until the server kills it
+  } else {
+    const cloneUrl = prompt.match(/^Clone URL: (\S+)$/m)?.[1] || process.env.FAKE_AUTO_CLONE_URL;
+    const repoDir = path.join(process.cwd(), 'repo');
+    mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init', '-q', repoDir]);
+    execFileSync('git', ['-C', repoDir, 'remote', 'add', 'origin', cloneUrl]);
+    emit({ type: 'result', subtype: 'success', result: 'Environment ready', duration_ms: 10, total_cost_usd: 0.01 });
+  }
 } else {
   // Worker: opens a "PR" and prints both the API URL and the web URL, like the real curl | jq step
   if (prompt.includes('FAIL_WORKER')) process.exit(2);

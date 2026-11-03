@@ -45,6 +45,8 @@ Containerized service that accepts task prompts via HTTP, uses Claude to identif
 - `src/server.js` - Express server, task orchestration, system prompts for orchestrator and worker
 - `src/dashboard.html` - Vanilla JS monitoring UI with 5s auto-refresh
 
+**Task actions:** each task in the dashboard has a `…` menu to archive or delete it. `PATCH /task/:id` with `{ "archived": true|false }` flags a task (archived tasks are hidden behind "Show archived" and left out of the counts); `DELETE /task/:id` removes it, stops its `claude` process if it is still running and deletes its work dir (log and clone). Branches and PRs are left alone. Tasks still live in memory, so both reset on restart.
+
 **Worker Constraints (defined in `getWorkerSystemPrompt`):**
 - Never use `AskUserQuestion` (hangs forever)
 - Aggressive subagent spawning for context management

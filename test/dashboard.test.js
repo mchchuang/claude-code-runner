@@ -29,6 +29,7 @@ async function boot({ routes = {}, hash = '', storage = {}, confirm = true } = {
   const calls = [];
   const navigations = [];
   const errors = [];
+  const alerts = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', e => {
     if (/navigation/.test(e.message)) navigations.push(e.message);
@@ -54,7 +55,8 @@ async function boot({ routes = {}, hash = '', storage = {}, confirm = true } = {
       window.CSS = { escape: s => String(s).replace(/["\\]/g, '\\$&') };
       window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
       window.HTMLDialogElement.prototype.close = function () { this.open = false; };
-      window.confirm = () => (typeof confirm === 'function' ? confirm() : confirm);
+      window.confirm = msg => (typeof confirm === 'function' ? confirm(msg) : confirm);
+      window.alert = msg => alerts.push(msg);
       // The page polls every 2s/5s; tests drive fetches explicitly instead
       window.setInterval = () => 0;
       window.clearInterval = () => {};
@@ -81,7 +83,7 @@ async function boot({ routes = {}, hash = '', storage = {}, confirm = true } = {
   const { window } = dom;
   const doc = window.document;
   return {
-    window, doc, calls, navigations, errors, table,
+    window, doc, calls, navigations, errors, alerts, table,
     $: id => doc.getElementById(id),
     run: code => window.eval(code),
     text: id => doc.getElementById(id).textContent.replace(/\s+/g, ' ').trim(),
@@ -441,6 +443,180 @@ describe('task list', () => {
     for (const c of q.calls) assert.equal(c.headers.Authorization, undefined);
     p.close();
     q.close();
+  });
+});
+
+describe('task actions menu', () => {
+  const menu = p => p.$('task-menu');
+  const items = p => [...menu(p).querySelectorAll('button')].map(b => b.textContent.trim());
+  const more = (p, id) => p.doc.querySelector(`#tasks .more[data-id="${id}"]`);
+
+  test('every task row has a ... button that opens a menu with Archive and Delete', async () => {
+    const p = await boot({ routes: { '/tasks': [task({ id: 'a1' }), task({ id: 'a2', archived: true })] } });
+    p.run('toggleArchived()');
+    assert.equal(p.doc.querySelectorAll('#tasks .task-row .more').length, 2);
+    assert.ok(menu(p).hidden);
+    more(p, 'a1').click();
+    assert.ok(!menu(p).hidden);
+    assert.equal(more(p, 'a1').getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(items(p), ['Archive', 'Delete…']);
+    assert.equal(p.doc.activeElement, menu(p).querySelector('button'), 'focus moves into the menu');
+    more(p, 'a2').click();
+    assert.deepEqual(items(p), ['Unarchive', 'Delete…'], 'archived tasks offer Unarchive');
+    assert.equal(more(p, 'a1').getAttribute('aria-expanded'), 'false');
+    assert.equal(p.calls.filter(c => c.method !== 'GET').length, 0, 'opening the menu calls nothing');
+    assert.equal(p.$('detail-head'), null, 'the ... button does not open the task');
+    p.close();
+  });
+
+  test('the menu closes on a second click, an outside click and Escape (without closing the open task)', async () => {
+    const p = await boot({ hash: '#a1', routes: { '/tasks': [task({ id: 'a1' })], '/task/a1/logs': '' } });
+    more(p, 'a1').click();
+    more(p, 'a1').click();
+    assert.ok(menu(p).hidden, 'toggled closed');
+    more(p, 'a1').click();
+    p.doc.body.click();
+    assert.ok(menu(p).hidden, 'outside click');
+    more(p, 'a1').click();
+    p.doc.dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'Escape' }));
+    assert.ok(menu(p).hidden, 'Escape');
+    assert.ok(p.$('detail-head'), 'the first Escape only closes the menu');
+    assert.equal(p.doc.activeElement, more(p, 'a1'), 'focus returns to the ... button');
+    p.close();
+  });
+
+  test('the menu stays open across the 5s list refresh', async () => {
+    const p = await boot({ routes: { '/tasks': [task({ id: 'a1' })] } });
+    more(p, 'a1').click();
+    await p.run('fetchTasks()');
+    assert.ok(!menu(p).hidden);
+    assert.equal(more(p, 'a1').getAttribute('aria-expanded'), 'true');
+    p.close();
+  });
+
+  test('archiving hides the task behind "Show archived", out of the counts; unarchiving brings it back', async () => {
+    const tasks = [task({ id: 'a1' }), task({ id: 'a2' })];
+    const p = await boot({
+      routes: {
+        '/tasks': () => tasks,
+        'PATCH /task/a1': ({ body }) => { Object.assign(tasks[0], JSON.parse(body)); return { status: 200, body: tasks[0] }; }
+      }
+    });
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="archive"]').click();
+    await settle();
+    const patch = p.calls.find(c => c.method === 'PATCH');
+    assert.equal(patch.path, '/task/a1');
+    assert.deepEqual(JSON.parse(patch.body), { archived: true });
+    assert.ok(menu(p).hidden);
+    assert.equal(p.doc.querySelectorAll('#tasks .task-row').length, 1);
+    assert.equal(p.text('counts'), '1 done');
+    assert.equal(p.$('toggle-archived').textContent, 'Show archived (1)');
+
+    p.$('toggle-archived').click();
+    const rows = p.doc.querySelectorAll('#tasks .task-row');
+    assert.equal(rows.length, 2);
+    assert.ok(rows[0].classList.contains('archived'));
+    assert.match(rows[0].textContent, /Archived/);
+    assert.equal(p.$('toggle-archived').textContent, 'Hide archived');
+
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="archive"]').click();
+    await settle();
+    assert.deepEqual(JSON.parse(p.calls.filter(c => c.method === 'PATCH')[1].body), { archived: false });
+    assert.equal(p.$('toggle-archived'), null, 'no toggle once nothing is archived');
+    assert.equal(p.text('counts'), '2 done');
+    assert.deepEqual(p.alerts, []);
+    p.close();
+  });
+
+  test('when every task is archived the list says so instead of the first-run empty state', async () => {
+    const p = await boot({ routes: { '/tasks': [task({ archived: true })] } });
+    assert.match(p.text('tasks'), /No active tasks\.\s*Show archived \(1\)/);
+    p.close();
+  });
+
+  test('the open task shows it is archived, and its header has the same menu', async () => {
+    const p = await boot({ hash: '#a1', routes: { '/tasks': [task({ id: 'a1', archived: true })], '/task/a1/logs': '' } });
+    const head = p.$('detail-head');
+    assert.match(head.querySelector('.head-row').textContent, /Archived/);
+    head.querySelector('.more').click();
+    assert.deepEqual(items(p), ['Unarchive', 'Delete…']);
+    p.close();
+  });
+
+  test('a failed archive is reported and changes nothing', async () => {
+    const p = await boot({ routes: { '/tasks': [task({ id: 'a1' })], 'PATCH /task/a1': { status: 500, body: { error: 'disk <full>' } } } });
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="archive"]').click();
+    await settle();
+    assert.deepEqual(p.alerts, ["Couldn't archive the task: disk <full>"]);
+    assert.equal(p.doc.querySelectorAll('#tasks .task-row').length, 1);
+    p.close();
+  });
+
+  test('deleting asks first, then removes the task and closes it if it was open', async () => {
+    const confirms = [];
+    let answer = false;
+    const p = await boot({
+      hash: '#a1',
+      confirm: msg => { confirms.push(msg); return answer; },
+      routes: { '/tasks': [task({ id: 'a1' }), task({ id: 'a2' })], '/task/a1/logs': '', 'DELETE /task/a1': { ok: true } }
+    });
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="delete"]').click();
+    await settle();
+    assert.match(confirms[0], /can't be undone/);
+    assert.equal(p.calls.filter(c => c.method === 'DELETE').length, 0, 'cancelled');
+    assert.ok(p.$('detail-head'));
+
+    answer = true;
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="delete"]').click();
+    await settle();
+    assert.equal(p.calls.find(c => c.method === 'DELETE').path, '/task/a1');
+    assert.equal(p.doc.querySelectorAll('#tasks .task-row').length, 1);
+    assert.equal(more(p, 'a1'), null);
+    assert.equal(p.$('detail-head'), null, 'the deleted task is closed');
+    assert.equal(p.window.location.hash, '');
+    assert.equal(p.text('counts'), '1 done');
+    p.close();
+  });
+
+  test('deleting a running task warns that it will be stopped; deleting another task leaves the open one', async () => {
+    const confirms = [];
+    const p = await boot({
+      hash: '#a2',
+      confirm: msg => { confirms.push(msg); return true; },
+      routes: { '/tasks': [task({ id: 'a1', status: 'running', finished: null }), task({ id: 'a2' })], '/task/a2/logs': '', 'DELETE /task/a1': { ok: true } }
+    });
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="delete"]').click();
+    await settle();
+    assert.match(confirms[0], /still running: Claude will be stopped/);
+    assert.equal(p.text('counts'), '1 done', 'running count gone');
+    assert.ok(p.$('detail-head'), 'the open task stays open');
+    p.close();
+  });
+
+  test('a task already gone on the server is still removed; other delete errors are reported', async () => {
+    const p = await boot({
+      routes: {
+        '/tasks': [task({ id: 'a1' }), task({ id: 'a2' })],
+        'DELETE /task/a1': { status: 404, body: { error: 'Not found' } },
+        'DELETE /task/a2': { status: 500, body: {} }
+      }
+    });
+    more(p, 'a1').click();
+    menu(p).querySelector('[data-action="delete"]').click();
+    await settle();
+    assert.equal(more(p, 'a1'), null);
+    more(p, 'a2').click();
+    menu(p).querySelector('[data-action="delete"]').click();
+    await settle();
+    assert.deepEqual(p.alerts, ["Couldn't delete the task: HTTP 500"]);
+    assert.ok(more(p, 'a2'));
+    p.close();
   });
 });
 

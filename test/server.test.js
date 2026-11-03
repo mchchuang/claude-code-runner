@@ -279,6 +279,8 @@ describe('without Gitea configured', () => {
   test('unknown tasks are 404s', async () => {
     assert.equal((await runner.request('GET', '/task/nope')).status, 404);
     assert.equal((await runner.request('GET', '/task/nope/logs')).status, 404);
+    assert.equal((await runner.request('PATCH', '/task/nope', { body: { archived: true } })).status, 404);
+    assert.equal((await runner.request('DELETE', '/task/nope')).status, 404);
   });
 });
 
@@ -382,5 +384,46 @@ describe('with Gitea', () => {
     assert.ok(json.length >= 4);
     const started = json.map(t => Date.parse(t.started));
     assert.deepEqual(started, [...started].sort((a, b) => b - a));
+  });
+
+  test('a task can be archived and unarchived; anything but a boolean is rejected', async () => {
+    const { json: created } = await runner.request('POST', '/task', { body: { prompt: 'Archive me', repo: 'martin/repo-4' } });
+    await waitForTask(runner, created.id);
+    for (const body of [{}, { archived: 'yes' }, { archived: 1 }, { archived: null }]) {
+      assert.equal((await runner.request('PATCH', `/task/${created.id}`, { body })).status, 400, JSON.stringify(body));
+    }
+    let res = await runner.request('PATCH', `/task/${created.id}`, { body: { archived: true } });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.archived, true);
+    assert.equal(res.json.status, 'completed', 'the rest of the task is unchanged');
+    assert.equal((await runner.request('GET', '/tasks')).json.find(t => t.id === created.id).archived, true, 'listed, flagged');
+    res = await runner.request('PATCH', `/task/${created.id}`, { body: { archived: false } });
+    assert.equal(res.json.archived, false);
+  });
+
+  test('deleting a finished task removes it, its log and its clone', async () => {
+    const { json: created } = await runner.request('POST', '/task', { body: { prompt: 'FAIL_WORKER', repo: 'martin/repo-5' } });
+    await waitForTask(runner, created.id);
+    assert.ok(existsSync(path.join(runner.workDir, created.id, 'repo')));
+    assert.equal((await runner.request('DELETE', `/task/${created.id}`)).status, 200);
+    assert.equal((await runner.request('GET', `/task/${created.id}`)).status, 404);
+    assert.equal((await runner.request('GET', `/task/${created.id}/logs`)).status, 404);
+    assert.ok(!(await runner.request('GET', '/tasks')).json.some(t => t.id === created.id));
+    assert.equal(existsSync(path.join(runner.workDir, created.id)), false);
+    assert.equal((await runner.request('DELETE', `/task/${created.id}`)).status, 404, 'second delete');
+  });
+
+  test('deleting a running task stops it and it does not come back', async () => {
+    const { json: created } = await runner.request('POST', '/task', { body: { prompt: 'HANG_ORCHESTRATOR', repo: 'martin/repo-6' } });
+    const running = (await runner.request('GET', `/task/${created.id}`)).json;
+    assert.equal(running.status, 'running');
+    await new Promise(r => setTimeout(r, 300)); // let the orchestrator start
+    assert.equal((await runner.request('DELETE', `/task/${created.id}`)).status, 200);
+    await new Promise(r => setTimeout(r, 500)); // the killed run winds down
+    assert.equal((await runner.request('GET', `/task/${created.id}`)).status, 404, 'not re-created by the failing run');
+    assert.equal(existsSync(path.join(runner.workDir, created.id)), false);
+    const health = (await runner.request('GET', '/health')).json;
+    assert.equal(health.running, 0);
+    assert.doesNotMatch(runner.output(), /Unhandled|ENOENT/);
   });
 });
