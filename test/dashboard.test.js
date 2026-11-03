@@ -111,6 +111,76 @@ describe('helpers', async () => {
     assert.equal(run('safeUrl(null)'), null);
   });
 
+  test('md renders emphasis, inline code and line breaks, and leaves plain text alone', () => {
+    const md = s => run(`md(${JSON.stringify(s)})`);
+    assert.equal(md('**Repo:** martin/app\n**Branch:** `feat/x`'),
+      '<p><strong>Repo:</strong> martin/app<br><strong>Branch:</strong> <code>feat/x</code></p>');
+    assert.equal(md('*a* _b_ __c__ ~~d~~'), '<p><em>a</em> <em>b</em> <strong>c</strong> <del>d</del></p>');
+    // Not emphasis: snake_case, spaced asterisks, unclosed markers, markers inside code
+    assert.equal(md('foo_bar_baz 2 * 3 * 4 **open'), '<p>foo_bar_baz 2 * 3 * 4 **open</p>');
+    assert.equal(md('`**x**` and `a_b_c`'), '<p><code>**x**</code> and <code>a_b_c</code></p>');
+    assert.equal(md('one\n\ntwo'), '<p>one</p><p>two</p>');
+    assert.equal(md(''), '');
+    assert.equal(md(null), '');
+    assert.equal(md('  \n\n '), '');
+    assert.equal(md('a\r\nb'), '<p>a<br>b</p>');
+  });
+
+  test('md escapes HTML everywhere and only links http(s) URLs', () => {
+    const md = s => run(`md(${JSON.stringify(s)})`);
+    assert.equal(md('<img src=x onerror=alert(1)> **<b>**'), '<p>&lt;img src=x onerror=alert(1)&gt; <strong>&lt;b&gt;</strong></p>');
+    assert.equal(md('[x](javascript:alert(1))'), '<p>[x](javascript:alert(1))</p>');
+    assert.equal(md('[PR #4](https://git.test/pr/4?a=1&b=2)'),
+      '<p><a href="https://git.test/pr/4?a=1&amp;b=2" target="_blank" rel="noopener">PR #4</a></p>');
+    // Bare URLs link, without trailing punctuation or surrounding quotes
+    assert.equal(md('See https://git.test/pr/1. Or "https://q.test/x_y"!'),
+      '<p>See <a href="https://git.test/pr/1" target="_blank" rel="noopener">https://git.test/pr/1</a>. '
+      + 'Or &quot;<a href="https://q.test/x_y" target="_blank" rel="noopener">https://q.test/x_y</a>&quot;!</p>');
+    assert.equal(md('**https://git.test/a**'),
+      '<p><strong><a href="https://git.test/a" target="_blank" rel="noopener">https://git.test/a</a></strong></p>');
+    assert.equal(md('```\n<script>x</script>\n```'), '<pre><code>&lt;script&gt;x&lt;/script&gt;</code></pre>');
+    assert.equal(md('a \u0000 0\u0000 b'), '<p>a  0 b</p>');
+  });
+
+  test('md renders headings, rules, quotes and fenced code', () => {
+    const md = s => run(`md(${JSON.stringify(s)})`);
+    assert.equal(md('# One\n## Two ##\n#### Four\n###### Six'), '<h3>One</h3><h4>Two</h4><h6>Four</h6><h6>Six</h6>');
+    assert.equal(md('#5 is not a heading'), '<p>#5 is not a heading</p>');
+    assert.equal(md('a\n---\nb\n***'), '<p>a</p><hr><p>b</p><hr>');
+    assert.equal(md('> quoted\n> **more**\n\nafter'), '<blockquote><p>quoted<br><strong>more</strong></p></blockquote><p>after</p>');
+    assert.equal(md('```js\nconst a = 1;\n\n  b();\n```\ntext'),
+      '<pre><code class="lang-js">const a = 1;\n\n  b();</code></pre><p>text</p>');
+    // An unclosed fence runs to the end
+    assert.equal(md('~~~\nopen'), '<pre><code>open</code></pre>');
+  });
+
+  test('md renders bulleted, numbered, nested and task lists', () => {
+    const md = s => run(`md(${JSON.stringify(s)})`);
+    assert.equal(md('- **Repo:** a\n* b\n+ c'), '<ul><li><strong>Repo:</strong> a</li><li>b</li><li>c</li></ul>');
+    assert.equal(md('Intro:\n1. one\n2. two\n   - nested\n   - more\n3. three\n\nAfter'),
+      '<p>Intro:</p><ol><li>one</li><li>two<ul><li>nested</li><li>more</li></ul></li><li>three</li></ol><p>After</p>');
+    assert.equal(md('3) c\n4) d'), '<ol start="3"><li>c</li><li>d</li></ol>');
+    assert.equal(md('- wraps\n  onto two\n- [ ] todo\n- [x] done'),
+      '<ul><li>wraps<br>onto two</li><li><input type="checkbox" disabled> todo</li>'
+      + '<li><input type="checkbox" disabled checked> done</li></ul>');
+    // Loose items stay in one list; a different marker type starts a new list
+    assert.equal(md('- a\n\n- b\n1. c'), '<ul><li>a</li><li>b</li></ul><ol><li>c</li></ol>');
+    assert.equal(md('- item\n\n  ```\n  code\n  ```'), '<ul><li>item<pre><code>code</code></pre></li></ul>');
+  });
+
+  test('md renders tables with alignment and missing cells', () => {
+    const md = s => run(`md(${JSON.stringify(s)})`);
+    assert.equal(md('| File | Lines |\n|:---|---:|\n| `a.js` | 3 |\n| b \\| c |\n\nafter'),
+      '<div class="table-wrap"><table><thead><tr><th>File</th><th style="text-align:right">Lines</th></tr></thead>'
+      + '<tbody><tr><td><code>a.js</code></td><td style="text-align:right">3</td></tr>'
+      + '<tr><td>b | c</td><td style="text-align:right"></td></tr></tbody></table></div><p>after</p>');
+    // A pipe without a separator row is just text
+    assert.equal(md('a | b'), '<p>a | b</p>');
+    assert.equal(md('| a | b |\n|:-:|---|\n| x |'),
+      '<div class="table-wrap"><table><thead><tr><th style="text-align:center">a</th><th>b</th></tr></thead>'
+      + '<tbody><tr><td style="text-align:center">x</td><td></td></tr></tbody></table></div>');
+  });
+
   test('ago buckets at minute, hour and day boundaries; future times are "just now"', () => {
     const at = s => run(`ago(new Date(Date.now() - ${s * 1000}).toISOString())`);
     assert.equal(at(0), 'just now');
@@ -264,6 +334,23 @@ describe('renderTimeline', async () => {
     const zero = render(`=== WORKER PHASE ===\n${j({ type: 'result', total_cost_usd: 0 })}`, { status: 'completed' });
     assert.match(zero.querySelector('.outcome-meta').textContent, /Cost \$0\.00/);
     assert.doesNotMatch(zero.querySelector('.outcome-meta').textContent, /Took/);
+  });
+
+  test("Claude's messages and the result render as Markdown", () => {
+    const log = [
+      '=== WORKER PHASE ===',
+      j({ type: 'assistant', message: { content: [{ type: 'text', text: '- **Repo:** martin/app\n- <i>x</i>' }] } }),
+      j({ type: 'result', result: '## Done\nOpened https://git.test/pr/1' })
+    ].join('\n');
+    const div = render(log, { status: 'completed' });
+    const say = div.querySelector('.say-text');
+    assert.equal(say.querySelector('li strong').textContent, 'Repo:');
+    assert.equal(say.querySelector('i'), null);
+    assert.match(say.textContent, /<i>x<\/i>/);
+    assert.doesNotMatch(say.textContent, /\*\*/);
+    const out = div.querySelector('.outcome-text');
+    assert.equal(out.querySelector('h4').textContent, 'Done');
+    assert.equal(out.querySelector('a').getAttribute('href'), 'https://git.test/pr/1');
   });
 
   test('tool output is escaped, expandable only when present, and truncated at 20000 chars', () => {

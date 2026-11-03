@@ -180,7 +180,27 @@
     @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
     @media (prefers-reduced-motion: reduce) { .step.live::before { animation: none; } }
 
-    .say-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; }
+    .say-text { overflow-wrap: anywhere; max-width: 72ch; }
+
+    /* Markdown from Claude's messages and results */
+    .md > * + * { margin-top: 8px; }
+    .md h3, .md h4, .md h5, .md h6 { font-size: 14px; font-weight: 600; }
+    .md h3 { font-size: 15.5px; }
+    .md * + h3, .md * + h4, .md * + h5, .md * + h6 { margin-top: 14px; }
+    .md ul, .md ol { padding-left: 22px; }
+    .md li + li, .md li > * + * { margin-top: 3px; }
+    .md li:has(> input[type=checkbox]) { list-style: none; margin-left: -20px; }
+    .md li > input[type=checkbox] { margin: 0 6px 0 0; vertical-align: -1px; }
+    .md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .md code { padding: 1px 5px; border-radius: 4px; background: var(--sunken); }
+    .md pre { padding: 10px 12px; border-radius: 7px; background: var(--sunken); overflow: auto; font: 12px/1.55 var(--mono); }
+    .md pre code { padding: 0; background: none; font: inherit; white-space: pre; }
+    .md blockquote { padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+    .md hr { border: 0; border-top: 1px solid var(--line); }
+    .md .table-wrap { overflow-x: auto; }
+    .md table { border-collapse: collapse; font-size: 13px; }
+    .md th, .md td { padding: 4px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .md th { background: var(--sunken); font-weight: 600; }
     .note { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 
     details.tool > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 10px; align-items: baseline; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; }
@@ -201,7 +221,7 @@
 
     .outcome { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
     .outcome.bad { border-color: var(--fail); }
-    .outcome-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; }
+    .outcome-text { overflow-wrap: anywhere; max-width: 72ch; }
     .outcome-meta { display: flex; gap: 16px; margin-top: 8px; color: var(--muted); font-size: 12.5px; }
 
     /* ---------- Settings dialog ---------- */
@@ -313,6 +333,120 @@
       return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     const safeUrl = u => /^https?:\/\//.test(u || '') ? u : null;
+
+    // Minimal Markdown renderer for Claude's text: everything is escaped first, so the only HTML out is ours.
+    // Covers what Claude writes: headings, emphasis, inline and fenced code, links, lists (nested, task
+    // checkboxes), blockquotes, tables and rules. Single newlines are kept as line breaks.
+    function mdInline(s) {
+      const keep = [];
+      const hold = html => `\u0000${keep.push(html) - 1}\u0000`;
+      let h = esc(String(s ?? '').replace(/\u0000/g, ''))
+        .replace(/`([^`\n]+)`/g, (_, c) => hold(`<code>${c}</code>`))
+        .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, t, u) => {
+          const href = safeUrl(u.replace(/&amp;/g, '&'));
+          return href ? hold(`<a href="${esc(href)}" target="_blank" rel="noopener">${t}</a>`) : m;
+        })
+        .replace(/\bhttps?:\/\/(?:(?!&quot;|&lt;|&gt;)[^\s<])+/g, raw => {
+          // Leave trailing punctuation (and Markdown markers) outside the link
+          const u = raw.match(/^.*?(?=[.,;:!?)\]'*_~]*$)/)[0];
+          const href = u.replace(/&amp;/g, '&');
+          return hold(`<a href="${esc(href)}" target="_blank" rel="noopener">${u}</a>`) + raw.slice(u.length);
+        })
+        .replace(/\*\*(?=\S)(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^\w])__(?=\S)(.+?)__(?!\w)/g, '$1<strong>$2</strong>')
+        .replace(/(^|[^*\w])\*(?=[^\s*])(.+?)\*(?![*\w])/g, '$1<em>$2</em>')
+        .replace(/(^|[^\w])_(?=[^\s_])(.+?)_(?!\w)/g, '$1<em>$2</em>')
+        .replace(/~~(?=\S)(.+?)~~/g, '<del>$1</del>')
+        .replace(/\n/g, '<br>');
+      while (h.includes('\u0000')) h = h.replace(/\u0000(\d+)\u0000/g, (_, n) => keep[n]);
+      return h;
+    }
+
+    const MD_LIST = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+    const MD_RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+    const MD_TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+    const mdCells = l => l.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, '|'));
+    const mdIndent = l => l.match(/^\s*/)[0].length;
+    const mdTableAt = (lines, i) => lines[i].includes('|') && MD_TABLE_SEP.test(lines[i + 1] || '') && lines[i + 1].includes('-');
+    const mdBlockStart = (lines, i) => /^\s*(```|~~~|#{1,6}\s|>)/.test(lines[i]) || MD_LIST.test(lines[i])
+      || MD_RULE.test(lines[i]) || mdTableAt(lines, i);
+
+    function md(src) {
+      const lines = String(src ?? '').replace(/\r\n?/g, '\n').split('\n');
+      const out = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        let m;
+        if (!line.trim()) { i++; continue; }
+        if ((m = line.match(/^\s*(```|~~~)\s*([\w+#.-]*)/))) {
+          const buf = [];
+          for (i++; i < lines.length && !lines[i].trim().startsWith(m[1]); i++) buf.push(lines[i]);
+          i++;
+          out.push(`<pre><code${m[2] ? ` class="lang-${esc(m[2])}"` : ''}>${esc(buf.join('\n'))}</code></pre>`);
+        } else if ((m = line.match(/^\s*(#{1,6})\s+(.*?)(\s+#+)?\s*$/))) {
+          // Phases are <h2>, so Markdown headings start at <h3>
+          const n = Math.min(m[1].length + 2, 6);
+          out.push(`<h${n}>${mdInline(m[2])}</h${n}>`);
+          i++;
+        } else if (MD_RULE.test(line)) {
+          out.push('<hr>');
+          i++;
+        } else if (/^\s*>/.test(line)) {
+          const buf = [];
+          while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*> ?/, ''));
+          out.push(`<blockquote>${md(buf.join('\n'))}</blockquote>`);
+        } else if (mdTableAt(lines, i)) {
+          const head = mdCells(line);
+          const align = mdCells(lines[i + 1]).map(c => c.endsWith(':') ? (c.startsWith(':') ? 'center' : 'right') : '');
+          const cell = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ''}>${mdInline(c)}</${tag}>`;
+          const rows = [];
+          for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|'); i++) rows.push(mdCells(lines[i]));
+          out.push(`<div class="table-wrap"><table><thead><tr>${head.map((c, k) => cell('th', c, k)).join('')}</tr></thead>`
+            + `<tbody>${rows.map(r => `<tr>${head.map((_, k) => cell('td', r[k] ?? '', k)).join('')}</tr>`).join('')}</tbody></table></div>`);
+        } else if ((m = line.match(MD_LIST))) {
+          const indent = m[1].length;
+          const ordered = /\d/.test(m[2]);
+          const sameList = lm => lm && lm[1].length === indent && /\d/.test(lm[2]) === ordered;
+          const items = [];
+          while (i < lines.length) {
+            const l = lines[i];
+            const lm = l.match(MD_LIST);
+            const it = items[items.length - 1];
+            if (sameList(lm)) { items.push({ head: [lm[3]], body: [] }); i++; continue; }
+            if (!l.trim()) {
+              let k = i;
+              while (k < lines.length && !lines[k].trim()) k++;
+              if (k < lines.length && (mdIndent(lines[k]) > indent || sameList(lines[k].match(MD_LIST)))) { it.body.push(''); i = k; continue; }
+              break;
+            }
+            if (mdIndent(l) > indent) {
+              (it.body.length || mdBlockStart(lines, i) ? it.body : it.head).push(it.body.length || mdBlockStart(lines, i) ? l : l.trim());
+              i++;
+              continue;
+            }
+            if (!it.body.length && !mdBlockStart(lines, i)) { it.head.push(l.trim()); i++; continue; }
+            break;
+          }
+          const tag = ordered ? 'ol' : 'ul';
+          const start = ordered ? parseInt(m[2], 10) : 1;
+          out.push(`<${tag}${start !== 1 ? ` start="${start}"` : ''}>${items.map(it => {
+            let head = it.head.join('\n');
+            let box = '';
+            const t = head.match(/^\[([ xX])\]\s+/);
+            if (t) { box = `<input type="checkbox" disabled${t[1] === ' ' ? '' : ' checked'}> `; head = head.slice(t[0].length); }
+            const body = it.body.filter(l => l.trim());
+            const cut = body.length ? Math.min(...body.map(mdIndent)) : 0;
+            return `<li>${box}${mdInline(head)}${body.length ? md(it.body.map(l => l.slice(cut)).join('\n')) : ''}</li>`;
+          }).join('')}</${tag}>`);
+        } else {
+          const buf = [line.trim()];
+          for (i++; i < lines.length && lines[i].trim() && !mdBlockStart(lines, i); i++) buf.push(lines[i].trim());
+          out.push(`<p>${mdInline(buf.join('\n'))}</p>`);
+        }
+      }
+      return out.join('');
+    }
 
     function ago(iso) {
       const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
@@ -511,7 +645,7 @@
           : live && isLast ? '<span class="state">In progress</span>' : '';
         const steps = p.items.map((it, ii) => {
           const liveCls = live && isLast && !p.result && ii === p.items.length - 1 ? ' live' : '';
-          if (it.kind === 'say') return `<li class="step say${liveCls}"><p class="say-text">${esc(it.text)}</p></li>`;
+          if (it.kind === 'say') return `<li class="step say${liveCls}"><div class="say-text md">${md(it.text)}</div></li>`;
           if (it.kind === 'note') return `<li class="step${liveCls}"><p class="note">${esc(it.text)}</p></li>`;
           const hasOut = it.out !== null && it.out.trim() !== '';
           return `<li class="step${it.bad ? ' bad' : ''}${liveCls}">
@@ -526,7 +660,7 @@
           </li>`;
         }).join('');
         const outcome = p.result ? `<div class="outcome${p.result.bad ? ' bad' : ''}">
-            ${p.result.text ? `<p class="outcome-text">${esc(p.result.text)}</p>` : ''}
+            ${p.result.text ? `<div class="outcome-text md">${md(p.result.text)}</div>` : ''}
             <div class="outcome-meta">
               ${p.result.ms ? `<span>Took ${span(p.result.ms)}</span>` : ''}
               ${p.result.cost != null ? `<span>Cost $${Number(p.result.cost).toFixed(2)}</span>` : ''}
