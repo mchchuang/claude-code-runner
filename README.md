@@ -89,10 +89,10 @@ services:
       - GITEA_URL=${GITEA_URL}            # e.g. https://git.example.com
       - GITEA_TOKEN=${GITEA_TOKEN}
       - PORT=3000
-      - SESSION_SECRET=${SESSION_SECRET}  # Optional: set for consistent sessions across restarts
+      - SESSION_SECRET=${SESSION_SECRET}  # Optional: generated and kept in /data if unset
     volumes:
       - ~/.claude/.credentials.json:/home/node/.claude/.credentials.json:ro
-      - claude-data:/data  # Persistent auth credentials and API tokens
+      - claude-data:/data  # Persistent auth credentials, API tokens and login sessions
     restart: unless-stopped
 
 volumes:

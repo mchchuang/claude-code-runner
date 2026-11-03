@@ -59,8 +59,8 @@ function mockGitea() {
 
 // ---------- Server under test ----------
 
-async function startRunner(env = {}) {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), 'ccr-test-'));
+// `tmp` reuses an earlier runner's directory (data, work dir), as a redeploy reuses the /data volume.
+async function startRunner(env = {}, { tmp = mkdtempSync(path.join(os.tmpdir(), 'ccr-test-')) } = {}) {
   const port = await freePort();
   writeFileSync(path.join(tmp, 'gitconfig'), '');
   const proc = spawn(process.execPath, [path.join(root, 'src', 'server.js')], {
@@ -101,8 +101,14 @@ async function startRunner(env = {}) {
     try { json = JSON.parse(text); } catch {}
     return { status: res.status, location: res.headers.get('location'), text, json };
   };
+  const exited = new Promise(resolve => proc.once('exit', resolve));
+  // kill() stops the server but keeps its directory, for restarting on it; stop() also removes the directory.
+  const kill = async () => { if (proc.exitCode === null && proc.signalCode === null) proc.kill(); await exited; };
   const stop = () => { proc.kill(); rmSync(tmp, { recursive: true, force: true }); };
-  return { request, stop, workDir: path.join(tmp, 'work'), dataDir: path.join(tmp, 'data'), output: () => output };
+  return {
+    request, stop, kill, tmp,
+    getCookie: () => cookie, setCookie: c => { cookie = c; }, workDir: path.join(tmp, 'work'), dataDir: path.join(tmp, 'data'), output: () => output
+  };
 }
 
 async function setUp(runner) {
@@ -171,6 +177,46 @@ describe('first-time setup and login', () => {
 
   test('logout ends the session', async () => {
     assert.equal((await runner.request('POST', '/api/logout')).status, 200);
+    assert.equal((await runner.request('GET', '/api/me')).status, 401);
+  });
+});
+
+describe('sessions across restarts', () => {
+  let runner;
+  after(() => runner.stop());
+
+  test('a login survives a restart on the same data dir, without SESSION_SECRET set', async () => {
+    runner = await startRunner({ SESSION_SECRET: '' });
+    await setUp(runner);
+    const cookie = runner.getCookie();
+    assert.ok(cookie, 'setup set a session cookie');
+    assert.ok(existsSync(path.join(runner.dataDir, 'session-secret')), 'the generated secret was saved');
+    assert.ok(existsSync(path.join(runner.dataDir, 'sessions.json')), 'the session was saved');
+
+    // Redeploy: new process, same volume
+    await runner.kill();
+    runner = await startRunner({ SESSION_SECRET: '' }, { tmp: runner.tmp });
+    runner.setCookie(cookie);
+    const me = await runner.request('GET', '/api/me');
+    assert.equal(me.status, 200, me.text);
+    assert.equal(me.json.username, 'martin');
+  });
+
+  test('logging out before a restart keeps the session ended after it', async () => {
+    const cookie = runner.getCookie();
+    assert.equal((await runner.request('POST', '/api/logout')).status, 200);
+    await runner.kill();
+    runner = await startRunner({ SESSION_SECRET: '' }, { tmp: runner.tmp });
+    runner.setCookie(cookie);
+    assert.equal((await runner.request('GET', '/api/me')).status, 401);
+  });
+
+  test('a changed SESSION_SECRET invalidates existing cookies', async () => {
+    assert.equal((await runner.request('POST', '/api/login', { body: { username: 'martin', password: 'correct horse' } })).status, 200);
+    const cookie = runner.getCookie();
+    await runner.kill();
+    runner = await startRunner({ SESSION_SECRET: 'a-different-secret' }, { tmp: runner.tmp });
+    runner.setCookie(cookie);
     assert.equal((await runner.request('GET', '/api/me')).status, 401);
   });
 });

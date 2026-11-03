@@ -8,6 +8,7 @@ import { createWriteStream, createReadStream, existsSync, readFileSync, writeFil
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { FileSessionStore, loadSessionSecret } from './session-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,10 +17,15 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session configuration
-const SESSION_SECRET = process.env.SESSION_SECRET || randomUUID();
+// Data directory and file paths
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const AUTH_FILE = process.env.AUTH_FILE || path.join(DATA_DIR, 'auth.json');
+const TOKEN_FILE = path.join(DATA_DIR, 'token.json');
+
+// Session configuration. The secret and the sessions live in DATA_DIR so logins survive restarts and redeploys.
 app.use(session({
-  secret: SESSION_SECRET,
+  secret: loadSessionSecret(path.join(DATA_DIR, 'session-secret')),
+  store: new FileSessionStore(path.join(DATA_DIR, 'sessions.json')),
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -28,11 +34,6 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
-
-// Data directory and file paths
-const DATA_DIR = process.env.DATA_DIR || '/data';
-const AUTH_FILE = process.env.AUTH_FILE || path.join(DATA_DIR, 'auth.json');
-const TOKEN_FILE = path.join(DATA_DIR, 'token.json');
 
 // API Token management
 function loadToken() {
