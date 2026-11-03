@@ -15,8 +15,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILDKIT_PROGRESS: plain
-  COMPOSE_PROGRESS: plain
+  COMPOSE_PROGRESS: quiet
 
 jobs:
   deploy:
@@ -42,22 +41,32 @@ jobs:
           image="$registry/$(echo '${{ gitea.repository }}' | tr '[:upper:]' '[:lower:]')"
           echo "REGISTRY=$registry" >> "$GITHUB_ENV"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
-          # --no-cache: the Dockerfile's "npm install -g @anthropic-ai/claude-code" line never changes, so a cached
-          # layer would pin an old Claude Code (and miss new models) forever
-          docker build --pull --no-cache -t "$image:${{ gitea.sha }}" -t "$image:latest" .
+          # Pass the current Claude Code release so its layer rebuilds when a new one ships (a cached layer would pin an
+          # old CLI and miss new models), while the apt/npm layers above it stay cached.
+          claude_code=$(curl -fsS https://registry.npmjs.org/@anthropic-ai/claude-code/latest | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+          [ -n "$claude_code" ] || { echo "::error::Could not look up the latest Claude Code version"; exit 1; }
+          echo "Claude Code $claude_code"
+          # Quiet on success. On failure, quiet mode hides the failing step's output, so rebuild with full output
+          # (cached layers make that fast up to the failing step).
+          set -- --build-arg CLAUDE_CODE_VERSION="$claude_code" -t "$image:${{ gitea.sha }}" -t "$image:latest" .
+          docker build --pull --progress=quiet "$@" || docker build --progress=plain "$@"
 
       - name: Push to the Gitea registry
-        # REGISTRY_TOKEN (a token with write:package) is only needed if the job token can't push packages.
+        # The job token can't push packages on this Gitea, so this needs a repo secret REGISTRY_TOKEN:
+        # a token with write:package, owned by the user the image lives under.
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
-          echo '${{ secrets.REGISTRY_TOKEN || gitea.token }}' | docker login "$REGISTRY" -u '${{ gitea.actor }}' --password-stdin
-          docker push "$IMAGE:${{ gitea.sha }}"
-          docker push "$IMAGE:latest"
+          [ -n "$REGISTRY_TOKEN" ] || { echo "::error::Add a repo secret REGISTRY_TOKEN (a Gitea token with write:package)"; exit 1; }
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u '${{ gitea.repository_owner }}' --password-stdin
+          docker push -q "$IMAGE:${{ gitea.sha }}"
+          docker push -q "$IMAGE:latest"
 
       - name: Deploy
         run: |
           cd "$APP_DIR"
-          docker compose pull
-          docker compose up -d
+          docker compose pull -q
+          docker compose up -d --quiet-pull
           docker image prune -f >/dev/null
 
       - name: Check it's serving

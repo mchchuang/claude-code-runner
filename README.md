@@ -168,6 +168,9 @@ pushes `:latest` and `:<commit sha>` to this Gitea's container registry, then ru
 It runs on a self-hosted act_runner defined in `runner/` (label `claude-code-runner:host`). One-time setup on the server:
 copy `runner/` there, run `./register.sh <registration-token>`, then `docker compose up -d --build` in it.
 
+The workflow's own token can't push to the container registry, so add a repo secret `REGISTRY_TOKEN` (Settings →
+Actions → Secrets): a Gitea access token with `write:package`, created by the repo owner.
+
 ## Integrations
 
 ### Clawdbot
