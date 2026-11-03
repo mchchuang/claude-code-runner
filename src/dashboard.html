@@ -568,7 +568,7 @@
       const repo = $('repo').value.trim();
       if (!prompt) return $('prompt').focus();
       if (repo && reposEnabled && !repos.some(r => r.full_name === repo)) {
-        setHint(`${repo} isn't one of your Gitea repos. Pick one from the list, or clear the field.`, true);
+        setHint(`${esc(repo)} isn't one of your Gitea repos. Pick one from the list, or clear the field.`, true);
         return $('repo').focus();
       }
       const btn = $('submit-btn');
@@ -582,7 +582,7 @@
         await fetchTasks();
         selectTask(data.id);
       } catch (err) {
-        setHint('Couldn\'t start the task: ' + err.message, true);
+        setHint('Couldn\'t start the task: ' + esc(err.message), true);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Run task';

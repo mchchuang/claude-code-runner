@@ -54,8 +54,11 @@ Every change comes with tests, and they must pass before anything deploys.
   without network or a Claude login. They need Linux or macOS (node-pty); on Windows run them in Docker the way
   `checks.yml` does.
 - `checks.yml` runs lint and tests on every PR; branch protection on `main` requires both to pass before merging.
-- The dashboard's JavaScript has no automated tests. For UI changes, render the pages against a mock of the API
-  (desktop light and dark, and a real 390px width) and look at the result.
+- `test/dashboard.test.js` loads the real `src/dashboard.html` into jsdom with a mocked `fetch` and covers the
+  dashboard's JavaScript: helpers, stream-json log parsing, timeline rendering, and the page ↔ API flows (task
+  list and detail, composer, repo picker, API token dialog). Extend it when you change the dashboard's behaviour.
+  jsdom doesn't do layout, so for visual changes still render the pages against a mock of the API (desktop light
+  and dark, and a real 390px width) and look at the result. `login.html` and `setup.html` have no automated tests.
 
 ## Lint and format
 
