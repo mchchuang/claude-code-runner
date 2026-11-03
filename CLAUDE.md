@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm start           # Run server (node src/server.js)
 npm run prepare     # Set up Husky git hooks
+npm test            # Integration tests (Linux/macOS; see AGENTS.md)
+npm run lint        # Biome
 ```
 
-No test or lint scripts - this is a minimal service. Docker is the primary deployment method.
+Docker is the primary deployment method.
 
 ## Architecture
 

@@ -2,12 +2,12 @@ import express from 'express';
 import session from 'express-session';
 import bcrypt from 'bcryptjs';
 import pty from 'node-pty';
-import { randomUUID } from 'crypto';
-import { mkdir, rm, appendFile, readFile, writeFile, access } from 'fs/promises';
-import { createWriteStream, createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
-import { execFile } from 'child_process';
-import { fileURLToPath } from 'url';
-import path from 'path';
+import { randomUUID } from 'node:crypto';
+import { mkdir, rm, appendFile, readFile, writeFile, access } from 'node:fs/promises';
+import { createWriteStream, createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,7 +56,7 @@ function saveToken(token) {
 }
 
 function generateToken() {
-  return 'ccr_' + randomUUID().replace(/-/g, '');
+  return `ccr_${randomUUID().replace(/-/g, '')}`;
 }
 
 let currentToken = loadToken();
@@ -80,7 +80,7 @@ async function saveAuthData(data) {
 
 async function isSetupComplete() {
   const auth = await loadAuthData();
-  return auth !== null && auth.username && auth.passwordHash;
+  return auth?.username && auth.passwordHash;
 }
 
 // Auth middleware
@@ -106,13 +106,13 @@ async function requireAuth(req, res, next) {
   }
 
   // Check session auth first (for browser users)
-  if (req.session && req.session.authenticated) {
+  if (req.session?.authenticated) {
     return next();
   }
 
   // Check Bearer token auth (for API clients)
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
     if (currentToken && token === currentToken) {
       return next();
@@ -130,7 +130,7 @@ async function requireAuth(req, res, next) {
 app.use(requireAuth);
 
 const tasks = new Map();
-const WORK_DIR = '/tmp/work';
+const WORK_DIR = process.env.WORK_DIR || '/tmp/work';
 const TASK_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
 // ============ Gitea Integration ============
@@ -201,7 +201,7 @@ async function resolveGiteaRepoFromClone(repoDir) {
   const fullName = strip(new URL(origin).pathname).split('/').filter(Boolean).slice(-2).join('/');
   const repo = await getGiteaRepo(fullName);
   // Same owner/name could exist elsewhere (e.g. GitHub upstream) - only accept a matching clone URL
-  if (strip(repo.clone_url) !== strip(origin) && !strip(origin).startsWith(GITEA_URL + '/')) {
+  if (strip(repo.clone_url) !== strip(origin) && !strip(origin).startsWith(`${GITEA_URL}/`)) {
     throw new Error(`origin ${origin} is not ${repo.full_name} on Gitea`);
   }
   return repo;
@@ -223,7 +223,7 @@ if (giteaEnabled) {
 // ============ Auth Routes ============
 
 // Setup page (first-time configuration)
-app.get('/setup', async (req, res) => {
+app.get('/setup', async (_req, res) => {
   if (await isSetupComplete()) {
     return res.redirect('/login');
   }
@@ -266,7 +266,7 @@ app.get('/login', async (req, res) => {
   if (!(await isSetupComplete())) {
     return res.redirect('/setup');
   }
-  if (req.session && req.session.authenticated) {
+  if (req.session?.authenticated) {
     return res.redirect('/');
   }
   const html = await readFile(path.join(__dirname, 'login.html'), 'utf-8');
@@ -314,7 +314,7 @@ app.post('/api/logout', (req, res) => {
 
 // Get current user info
 app.get('/api/me', (req, res) => {
-  if (req.session && req.session.authenticated) {
+  if (req.session?.authenticated) {
     res.json({ username: req.session.username });
   } else {
     res.status(401).json({ error: 'Not authenticated' });
@@ -324,7 +324,7 @@ app.get('/api/me', (req, res) => {
 // ============ API Token Management ============
 
 // Generate new API token
-app.post('/token/generate', (req, res) => {
+app.post('/token/generate', (_req, res) => {
   const token = generateToken();
   currentToken = token;
   saveToken(token);
@@ -332,17 +332,17 @@ app.post('/token/generate', (req, res) => {
 });
 
 // Get token status (masked)
-app.get('/token', (req, res) => {
+app.get('/token', (_req, res) => {
   if (!currentToken) {
     return res.json({ exists: false });
   }
   // Return masked token: ccr_a1b2...x9z0
-  const masked = currentToken.slice(0, 8) + '...' + currentToken.slice(-4);
+  const masked = `${currentToken.slice(0, 8)}...${currentToken.slice(-4)}`;
   res.json({ exists: true, masked });
 });
 
 // Revoke token
-app.delete('/token', (req, res) => {
+app.delete('/token', (_req, res) => {
   currentToken = null;
   try {
     if (existsSync(TOKEN_FILE)) {
@@ -532,7 +532,7 @@ app.get('/api/repos', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     tasks: tasks.size,
@@ -541,7 +541,7 @@ app.get('/health', (req, res) => {
 });
 
 // List all tasks
-app.get('/tasks', (req, res) => {
+app.get('/tasks', (_req, res) => {
   const taskList = [...tasks.entries()].map(([id, task]) => ({
     id,
     ...task
@@ -551,7 +551,7 @@ app.get('/tasks', (req, res) => {
 });
 
 // Dashboard UI
-app.get('/', async (req, res) => {
+app.get('/', async (_req, res) => {
   const html = await readFile(path.join(__dirname, 'dashboard.html'), 'utf-8');
   res.setHeader('Content-Type', 'text/html');
   res.send(html);
@@ -618,21 +618,16 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
       reject(err);
     }, 20 * 60 * 1000); // 20 min timeout for orchestrator (includes env setup)
 
-    let output = '';
-
     console.log(`[${id}] Orchestrator PTY spawned, pid: ${proc.pid}`);
 
-    proc.onData(data => {
-      output += data;
-      logStream.write(data);
-    });
+    proc.onData(data => logStream.write(data));
 
     proc.onExit(async ({ exitCode }) => {
       clearTimeout(timeout);
       logStream.end();
 
       if (exitCode !== 0) {
-        return reject(new Error(`Orchestrator exited with code ${exitCode}`));
+        return reject(Object.assign(new Error(`Orchestrator exited with code ${exitCode}`), { errorType: 'exit_code' }));
       }
 
       console.log(`[${id}] Orchestrator completed successfully`);
@@ -705,7 +700,8 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
         await rm(repoDir, { recursive: true, force: true }).catch(() => {});
       }
 
-      exitCode === 0 ? resolve() : reject(new Error(`Worker exited with code ${exitCode}`));
+      // errorType on the error too: runTask's catch overwrites the task with it
+      exitCode === 0 ? resolve() : reject(Object.assign(new Error(`Worker exited with code ${exitCode}`), { errorType: 'exit_code' }));
     });
   });
 }

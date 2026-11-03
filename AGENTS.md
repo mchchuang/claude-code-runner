@@ -8,8 +8,8 @@ Never commit straight to `main`. For every change:
 2. Commit (Conventional Commits, below) and push the branch.
 3. Open a pull request using `.gitea/pull_request_template.md`: Summary, Testing (tests added/changed), and the
    checklist (edge cases covered by tests, no regressions, optimized for efficiency/cost/systems).
-4. The user reviews and merges. Merging to `main` builds the image and deploys it (`.gitea/workflows/deploy.yml`);
-   there are no PR checks yet, so the PR's Testing section is the only gate.
+4. The user reviews and merges. CI lints and tests the PR (`.gitea/workflows/checks.yml`); merging to `main` builds
+   the image and deploys it (`.gitea/workflows/deploy.yml`).
 
 ## Commits
 
@@ -49,15 +49,19 @@ Every change comes with tests, and they must pass before anything deploys.
   server ↔ the `claude` CLI and its stream-json log, page ↔ API data shape), and end-to-end or browser checks for
   user-facing flows. Say which levels you covered and what is still untested.
 - When fixing a bug, add a test that fails without the fix.
-- There is no test suite or test script yet. Until there is: run `node --check src/server.js`, cover new logic with
-  a small self-check, and for UI changes render the pages against a mock of the API (desktop light and dark, and
-  a real 390px width) and look at the result. The first real suite gets an `npm test` script and a PR check
-  workflow so it gates merging.
+- `npm test` runs `test/*.test.js` with Node's built-in runner. The server tests start the real server against a
+  mock Gitea API and a fake `claude` CLI (`test/fixtures/`), so they cover HTTP routes, auth and whole task runs
+  without network or a Claude login. They need Linux or macOS (node-pty); on Windows run them in Docker the way
+  `checks.yml` does.
+- `checks.yml` runs lint and tests on every PR; branch protection on `main` requires both to pass before merging.
+- The dashboard's JavaScript has no automated tests. For UI changes, render the pages against a mock of the API
+  (desktop light and dark, and a real 390px width) and look at the result.
 
 ## Lint and format
 
-- No linter or formatter is configured. Match the surrounding code: 2-space indent, single quotes, semicolons,
-  ES modules.
+- Biome lints `src/` and `test/` (`biome.json`, recommended rules). `npm run lint` fails on warnings too. Fix lint
+  errors rather than silencing them; a deliberate exception gets a `biome-ignore` comment with the reason.
+- No formatter is enforced. Match the surrounding code: 2-space indent, single quotes, semicolons, ES modules.
 
 ## CI (Gitea Actions)
 

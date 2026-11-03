@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "lint": "biome lint --error-on-warnings",
     "prepare": "husky"
   },
   "dependencies": {
@@ -13,6 +15,7 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.4",
     "@commitlint/cli": "^19.6.1",
     "@commitlint/config-conventional": "^19.6.0",
     "husky": "^9.1.7"

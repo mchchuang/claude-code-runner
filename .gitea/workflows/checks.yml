@@ -1,0 +1,58 @@
+# Lint and tests for every pull request; merging to main requires both to pass (branch protection).
+#
+# Runs on the server's own act_runner (runner/ in this repo, label claude-code-runner:host). The runner has no
+# Node, so each job streams the checked-out tree into a node:20 container (git archive | docker run -i): no bind
+# mounts, whose paths would resolve on the host rather than in the runner. node:20, not -slim, because node-pty
+# compiles during npm ci.
+
+name: Checks
+
+on:
+  pull_request:
+
+env:
+  NODE_IMAGE: node:20
+
+jobs:
+  lint:
+    runs-on: claude-code-runner
+    steps:
+      - name: Check out this commit
+        # Plain git with the job token, since the runner has no Node for actions/checkout. Host-mode workspaces
+        # persist between runs, so leftovers are cleaned.
+        run: |
+          git init -q .
+          git -c http.extraHeader="Authorization: token ${{ gitea.token }}" \
+            fetch -q "${{ gitea.server_url }}/${{ gitea.repository }}.git" "${{ gitea.ref }}"
+          git checkout -q -f --detach FETCH_HEAD
+          git clean -fdxq
+          git log -1 --oneline
+
+      - name: Lint
+        # --ignore-scripts: lint doesn't need node-pty built
+        run: |
+          docker pull -q "$NODE_IMAGE" >/dev/null
+          git archive HEAD | docker run --rm -i -e HUSKY=0 -e NPM_CONFIG_UPDATE_NOTIFIER=false "$NODE_IMAGE" sh -c '
+            mkdir /w && cd /w && tar -x &&
+            npm ci --ignore-scripts --no-fund --no-audit --loglevel=error &&
+            npm run -s lint'
+
+  test:
+    runs-on: claude-code-runner
+    steps:
+      - name: Check out this commit
+        run: |
+          git init -q .
+          git -c http.extraHeader="Authorization: token ${{ gitea.token }}" \
+            fetch -q "${{ gitea.server_url }}/${{ gitea.repository }}.git" "${{ gitea.ref }}"
+          git checkout -q -f --detach FETCH_HEAD
+          git clean -fdxq
+          git log -1 --oneline
+
+      - name: Tests
+        run: |
+          docker pull -q "$NODE_IMAGE" >/dev/null
+          git archive HEAD | docker run --rm -i -e HUSKY=0 -e NPM_CONFIG_UPDATE_NOTIFIER=false "$NODE_IMAGE" sh -c '
+            mkdir /w && cd /w && tar -x &&
+            npm ci --no-fund --no-audit --loglevel=error &&
+            npm test'
