@@ -1,0 +1,3 @@
+#!/bin/sh
+# Put on PATH as `claude` by the tests; see fake-claude.mjs
+exec node "$(dirname "$0")/fake-claude.mjs" "$@"
