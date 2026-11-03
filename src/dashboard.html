@@ -3,690 +3,722 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
   <title>Claude Runner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg: #f5f6f8;
+      --surface: #ffffff;
+      --sunken: #eef0f3;
+      --line: #e1e4e9;
+      --ink: #15171c;
+      --muted: #687082;
+      --accent: #3b5bdb;
+      --accent-soft: #e8edfd;
+      --ok: #1f8a4c;
+      --ok-soft: #e4f4ea;
+      --fail: #cf3a3a;
+      --fail-soft: #fbe9e9;
+      --sans: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e0f12;
+        --surface: #16181c;
+        --sunken: #1d2025;
+        --line: #272a31;
+        --ink: #e9eaee;
+        --muted: #8e93a0;
+        --accent: #8b9df7;
+        --accent-soft: #1f2540;
+        --ok: #4cc983;
+        --ok-soft: #15291e;
+        --fail: #f07a7a;
+        --fail-soft: #331a1c;
+        color-scheme: dark;
+      }
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-      background: #0d1117;
-      color: #c9d1d9;
-      padding: 20px;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    h1 { color: #58a6ff; margin: 0; }
-    .header {
+      font: 14px/1.5 var(--sans);
+      background: var(--bg);
+      color: var(--ink);
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
     }
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      color: #8b949e;
-      font-size: 14px;
-    }
-    .logout-btn {
-      background: #21262d;
-      border: 1px solid #30363d;
-      color: #c9d1d9;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .logout-btn:hover { background: #30363d; }
-    .stats {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 30px;
-      flex-wrap: wrap;
-    }
-    .stat {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 16px 24px;
-      text-align: center;
-    }
-    .stat-value {
-      font-size: 32px;
-      font-weight: bold;
-    }
-    .stat-label { color: #8b949e; font-size: 14px; }
-    .stat.running .stat-value { color: #f0883e; }
-    .stat.completed .stat-value { color: #3fb950; }
-    .stat.failed .stat-value { color: #f85149; }
+    a { color: inherit; }
+    button, input, textarea { font: inherit; color: inherit; }
+    code, .mono { font-family: var(--mono); font-size: 12.5px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-    .submit-form {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 20px;
-      margin-bottom: 30px;
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 12px;
+      border: 1px solid var(--line); border-radius: 7px;
+      background: var(--surface); cursor: pointer; white-space: nowrap;
+      text-decoration: none; font-weight: 500;
     }
-    .submit-form h2 { font-size: 16px; margin-bottom: 12px; color: #8b949e; }
-    .submit-form textarea {
-      width: 100%;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #c9d1d9;
-      padding: 12px;
-      font-family: inherit;
-      font-size: 14px;
-      resize: vertical;
-      min-height: 80px;
-    }
-    .submit-form button {
-      margin-top: 12px;
-      background: #238636;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 10px 20px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    .submit-form button:hover { background: #2ea043; }
-    .submit-form button:disabled { background: #30363d; cursor: not-allowed; }
+    .btn:hover { background: var(--sunken); }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+    .btn.primary:hover { opacity: .88; }
+    .btn.quiet { border-color: transparent; background: none; color: var(--muted); }
+    .btn.quiet:hover { color: var(--ink); background: var(--sunken); }
+    .btn.danger { color: var(--fail); }
 
-    .repo-picker { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
-    .repo-picker input, .repo-picker select {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #c9d1d9;
-      padding: 8px;
-      font-size: 14px;
+    /* ---------- Top bar ---------- */
+    .topbar {
+      display: flex; align-items: center; gap: 16px;
+      height: 52px; padding: 0 16px;
+      border-bottom: 1px solid var(--line); background: var(--surface);
+      flex-shrink: 0;
     }
-    .repo-picker input { flex: 1; min-width: 160px; }
-    .repo-picker select { flex: 2; min-width: 240px; }
-    .repo-picker .refresh-btn {
-      margin-top: 0;
-      background: #21262d;
-      border: 1px solid #30363d;
-      color: #c9d1d9;
-      padding: 8px 12px;
-    }
-    .repo-picker .refresh-btn:hover { background: #30363d; }
-    .repo-info { color: #8b949e; font-size: 12px; margin-bottom: 12px; min-height: 16px; }
+    .wordmark { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+    .counts { display: flex; gap: 14px; color: var(--muted); font-size: 13px; }
+    .counts .running { color: var(--accent); font-weight: 500; }
+    .topbar .spacer { flex: 1; }
+    .who { color: var(--muted); font-size: 13px; }
 
-    .task-list { margin-top: 20px; }
-    .task-list h2 { font-size: 16px; margin-bottom: 12px; color: #8b949e; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      overflow: hidden;
+    /* ---------- Split layout ---------- */
+    .split { flex: 1; display: grid; grid-template-columns: minmax(320px, 400px) 1fr; min-height: 0; }
+    .split > * { min-width: 0; } /* long commands must truncate, not widen the page */
+    .side { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); min-height: 0; }
+
+    .composer { padding: 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+    .repo-row { display: flex; gap: 6px; }
+    .field {
+      width: 100%; height: 34px; padding: 0 10px;
+      border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
     }
-    th, td {
-      text-align: left;
-      padding: 12px;
-      border-bottom: 1px solid #30363d;
+    .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    textarea.field { height: auto; min-height: 96px; padding: 9px 10px; resize: vertical; line-height: 1.5; }
+    .composer-foot { display: flex; align-items: center; gap: 10px; }
+    .hint { color: var(--muted); font-size: 12.5px; flex: 1; min-width: 0; }
+    .hint.error { color: var(--fail); }
+    .hint a { color: var(--muted); }
+
+    .list { flex: 1; overflow-y: auto; }
+    .task {
+      display: grid; grid-template-columns: 14px 1fr; gap: 2px 10px;
+      width: 100%; padding: 12px 16px; text-align: left;
+      border: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer;
     }
-    th { background: #21262d; color: #8b949e; font-weight: 600; }
-    tr:last-child td { border-bottom: none; }
-    tr:hover { background: #1f2428; }
+    .task:hover { background: var(--sunken); }
+    .task[aria-current="true"] { background: var(--accent-soft); }
+    .task .dot { margin-top: 6px; }
+    .task-title { font-weight: 500; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .task-sub { grid-column: 2; display: flex; gap: 10px; color: var(--muted); font-size: 12.5px; }
+    .task-sub .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-sub .when { margin-left: auto; flex-shrink: 0; }
+    .empty { padding: 32px 16px; color: var(--muted); text-align: center; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.running { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .dot.completed { background: var(--ok); }
+    .dot.failed { background: var(--fail); }
+
+    /* ---------- Detail ---------- */
+    .detail { overflow-y: auto; min-height: 0; }
+    .detail-inner { max-width: 820px; margin: 0 auto; padding: 28px 32px 64px; }
+    .placeholder { height: 100%; display: grid; place-items: center; color: var(--muted); padding: 32px; text-align: center; }
+    .back { display: none; margin-bottom: 16px; }
+
     .status {
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 600;
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 24px; padding: 0 9px; border-radius: 999px;
+      font-size: 12.5px; font-weight: 500;
+      background: var(--sunken); color: var(--muted);
     }
-    .status.running { background: #f0883e22; color: #f0883e; }
-    .status.completed { background: #3fb95022; color: #3fb950; }
-    .status.failed { background: #f8514922; color: #f85149; }
-    .status.queued { background: #58a6ff22; color: #58a6ff; }
-    a { color: #58a6ff; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .prompt { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .log-btn {
-      background: #21262d;
-      border: 1px solid #30363d;
-      color: #c9d1d9;
-      padding: 4px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .log-btn:hover { background: #30363d; }
+    .status.running { background: var(--accent-soft); color: var(--accent); }
+    .status.completed { background: var(--ok-soft); color: var(--ok); }
+    .status.failed { background: var(--fail-soft); color: var(--fail); }
+    .status .dot { background: currentColor; box-shadow: none; }
 
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.8);
-      z-index: 1000;
-      padding: 40px;
+    .detail h1 { font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -0.015em; margin: 14px 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .prompt-more { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 4px; }
+    .facts { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted); font-size: 13px; margin: 14px 0 0; }
+    .facts dt { display: inline; }
+    .facts dd { display: inline; color: var(--ink); margin-left: 6px; }
+    .head-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .head-row .btn { margin-left: auto; }
+    .problem { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--fail-soft); color: var(--fail); }
+    .problem p + p { margin-top: 4px; color: var(--ink); opacity: .8; }
+
+    /* ---------- Run timeline ---------- */
+    .phase { margin-top: 32px; }
+    .phase-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 10px; }
+    .phase-head h2 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .phase-head .what { color: var(--muted); font-size: 13px; }
+    .phase-head .state { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+    .phase-head .state.ok { color: var(--ok); }
+    .phase-head .state.fail { color: var(--fail); }
+
+    .steps { list-style: none; position: relative; margin-left: 4px; padding-left: 22px; border-left: 1px solid var(--line); }
+    .step { position: relative; padding: 5px 0; }
+    .step::before {
+      content: ''; position: absolute; left: -26px; top: 13px;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--surface); border: 1px solid var(--muted);
     }
-    .modal.open { display: flex; flex-direction: column; }
-    .modal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
+    .step.say::before { background: var(--muted); border-color: var(--muted); }
+    .step.bad::before { border-color: var(--fail); background: var(--fail); }
+    .step.live::before { border-color: var(--accent); background: var(--accent); animation: pulse 1.6s ease-out infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+    @media (prefers-reduced-motion: reduce) { .step.live::before { animation: none; } }
+
+    .say-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; }
+    .note { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+
+    details.tool > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 10px; align-items: baseline; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; }
+    details.tool > summary::-webkit-details-marker { display: none; }
+    details.tool > summary:hover { background: var(--sunken); }
+    details.tool:not(.has-output) > summary { cursor: default; }
+    details.tool:not(.has-output) > summary:hover { background: none; }
+    .tool-name { font-weight: 600; font-size: 13px; }
+    .tool-what { overflow-wrap: anywhere; }
+    .tool-cmd { grid-column: 2; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    details[open] .tool-cmd { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-out {
+      margin: 6px 0 4px; padding: 10px 12px; border-radius: 7px;
+      background: var(--sunken); max-height: 360px; overflow: auto;
+      white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 var(--mono);
     }
-    .modal-title { color: #58a6ff; }
-    .modal-close {
-      background: none;
-      border: none;
-      color: #8b949e;
-      font-size: 24px;
-      cursor: pointer;
+    .tool-out.bad { color: var(--fail); }
+
+    .outcome { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .outcome.bad { border-color: var(--fail); }
+    .outcome-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; }
+    .outcome-meta { display: flex; gap: 16px; margin-top: 8px; color: var(--muted); font-size: 12.5px; }
+
+    /* ---------- Settings dialog ---------- */
+    dialog {
+      margin: auto; width: min(480px, calc(100vw - 32px));
+      border: 1px solid var(--line); border-radius: 12px;
+      background: var(--surface); color: var(--ink); padding: 0;
     }
-    .modal-content {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 16px;
-      flex: 1;
-      overflow: auto;
-      font-family: monospace;
-      font-size: 13px;
+    dialog::backdrop { background: rgb(0 0 0 / .4); }
+    .dlg-head { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    .dlg-head h2 { font-size: 15px; font-weight: 600; flex: 1; }
+    .dlg-body { padding: 20px; display: grid; gap: 14px; }
+    .dlg-body p { color: var(--muted); }
+    .token-state { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .new-token { padding: 12px; border-radius: 8px; background: var(--ok-soft); display: grid; gap: 8px; }
+    .new-token p { color: var(--ok); font-weight: 500; }
+    .new-token code { overflow-wrap: anywhere; }
+    label.stack { display: grid; gap: 6px; font-weight: 500; }
+    label.stack small { color: var(--muted); font-weight: 400; }
+
+    /* ---------- Narrow screens: list, then full-screen task ---------- */
+    @media (max-width: 860px) {
+      .split { grid-template-columns: 1fr; }
+      .detail { display: none; }
+      body.show-detail .side { display: none; }
+      body.show-detail .detail { display: block; }
+      .detail-inner { padding: 16px 16px 48px; }
+      .back { display: inline-flex; }
+      .counts, .who { display: none; }
     }
-    .log-entry { margin-bottom: 12px; padding: 8px; border-radius: 4px; }
-    .log-entry.system { background: #1f2937; border-left: 3px solid #6b7280; }
-    .log-entry.assistant { background: #1e3a5f; border-left: 3px solid #58a6ff; }
-    .log-entry.user { background: #2d1f3d; border-left: 3px solid #a855f7; }
-    .log-entry.result { background: #1a2e1a; border-left: 3px solid #3fb950; }
-    .log-entry.result.error { background: #2e1a1a; border-left: 3px solid #f85149; }
-    .log-entry.phase { background: #3d2f1a; border-left: 3px solid #f0883e; font-weight: bold; }
-    .log-entry.raw { background: #21262d; white-space: pre-wrap; word-break: break-all; }
-    .log-type { font-size: 10px; text-transform: uppercase; color: #8b949e; margin-bottom: 4px; }
-    .log-tool { color: #f0883e; font-weight: 600; }
-    .log-text { white-space: pre-wrap; word-break: break-word; }
-    .log-meta { font-size: 11px; color: #6b7280; margin-top: 6px; }
-    .log-cost { color: #3fb950; }
-    .refresh-note { color: #8b949e; font-size: 12px; margin-left: auto; }
-    .empty { color: #8b949e; text-align: center; padding: 40px; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Claude Runner</h1>
-    <div class="user-info">
-      <span id="username"></span>
-      <button class="logout-btn" onclick="logout()">Sign Out</button>
-    </div>
+  <header class="topbar">
+    <span class="wordmark">Claude Runner</span>
+    <div class="counts" id="counts"></div>
+    <span class="spacer"></span>
+    <span class="who" id="username"></span>
+    <button class="btn quiet" onclick="openSettings()">API access</button>
+    <button class="btn quiet" onclick="logout()">Sign out</button>
+  </header>
+
+  <div class="split">
+    <aside class="side">
+      <form class="composer" id="composer" onsubmit="submitTask(event)">
+        <div class="repo-row" id="repo-row" hidden>
+          <input class="field" id="repo" list="repo-options" autocomplete="off" spellcheck="false"
+            placeholder="Any repo (Claude picks from your prompt)" aria-label="Repository"
+            oninput="onRepoInput()">
+          <datalist id="repo-options"></datalist>
+          <button type="button" class="btn quiet" onclick="fetchRepos(true)" title="Reload repos" aria-label="Reload repos">&#x21bb;</button>
+        </div>
+        <textarea class="field" id="prompt" placeholder="Describe the change you want" aria-label="Task"></textarea>
+        <div class="composer-foot">
+          <span class="hint" id="repo-hint"></span>
+          <button class="btn primary" id="submit-btn" type="submit" title="Ctrl+Enter">Run task</button>
+        </div>
+      </form>
+      <nav class="list" id="tasks" aria-label="Tasks"></nav>
+    </aside>
+
+    <main class="detail" id="detail">
+      <div class="placeholder" id="placeholder">Pick a task to follow what Claude is doing.</div>
+    </main>
   </div>
 
-  <div class="stats">
-    <div class="stat running">
-      <div class="stat-value" id="running">-</div>
-      <div class="stat-label">Running</div>
+  <dialog id="settings">
+    <div class="dlg-head">
+      <h2>API access</h2>
+      <button class="btn quiet" onclick="settings.close()" aria-label="Close">&times;</button>
     </div>
-    <div class="stat completed">
-      <div class="stat-value" id="completed">-</div>
-      <div class="stat-label">Completed</div>
-    </div>
-    <div class="stat failed">
-      <div class="stat-value" id="failed">-</div>
-      <div class="stat-label">Failed</div>
-    </div>
-    <div class="refresh-note">Auto-refresh: 5s</div>
-  </div>
-
-  <div class="submit-form">
-    <h2>Submit New Task</h2>
-    <div id="repo-section" style="display: none;">
-      <div class="repo-picker">
-        <input type="text" id="repo-filter" placeholder="Filter repos..." oninput="renderRepoOptions()">
-        <select id="repo-select" onchange="onRepoChange(true)"></select>
-        <button class="refresh-btn" onclick="fetchRepos(true)" title="Reload repo list">&#x21bb;</button>
+    <div class="dlg-body">
+      <p>Scripts and integrations call this runner with an API token. Only one token exists at a time.</p>
+      <div class="token-state">
+        <span id="token-status">Checking…</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn danger" id="revoke-btn" onclick="revokeToken()" hidden>Revoke</button>
+        <button class="btn" onclick="generateToken()">Generate token</button>
       </div>
-      <div class="repo-info" id="repo-info"></div>
+      <div class="new-token" id="new-token" hidden>
+        <p>Copy this token now. It won't be shown again.</p>
+        <code id="new-token-value"></code>
+        <div><button class="btn" id="copy-btn" onclick="copyToken()">Copy token</button></div>
+      </div>
+      <label class="stack">
+        Token for this browser
+        <input class="field" type="password" id="api-token" placeholder="Paste a token" autocomplete="off">
+        <small>Sent with this dashboard's requests. Stored in this browser only.</small>
+      </label>
     </div>
-    <textarea id="prompt" placeholder="Enter your task prompt..."></textarea>
-    <button id="submit-btn" onclick="submitTask()">Submit Task</button>
-  </div>
-
-  <div class="submit-form" style="margin-bottom: 30px;">
-    <h2>API Token</h2>
-    <div id="token-status">Loading...</div>
-    <div id="token-actions" style="margin-top: 12px;">
-      <button id="generate-btn" onclick="generateToken()" style="background: #238636; color: #fff; border: none; border-radius: 6px; padding: 10px 20px; cursor: pointer;">
-        Generate New Token
-      </button>
-      <button id="revoke-btn" onclick="revokeToken()" style="background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 10px 20px; cursor: pointer; margin-left: 8px; display: none;">
-        Revoke
-      </button>
-    </div>
-    <div id="new-token-display" style="display: none; margin-top: 12px; background: #1a2e1a; border: 1px solid #3fb950; border-radius: 6px; padding: 12px;">
-      <div style="color: #3fb950; font-weight: bold; margin-bottom: 8px;">New token generated! Copy it now - it won't be shown again.</div>
-      <code id="new-token-value" style="word-break: break-all; font-size: 14px;"></code>
-      <button onclick="copyToken()" style="margin-left: 12px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 4px 8px; border-radius: 4px; cursor: pointer;">Copy</button>
-    </div>
-    <div style="margin-top: 12px;">
-      <input type="password" id="api-token" placeholder="Paste token here for API access"
-        style="width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px; font-size: 14px;">
-      <small style="color: #8b949e;">Token saved in browser localStorage for dashboard requests</small>
-    </div>
-  </div>
-
-  <div class="task-list">
-    <h2>Tasks</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Repo</th>
-          <th>Prompt</th>
-          <th>Status</th>
-          <th>Started</th>
-          <th>PR</th>
-          <th>Logs</th>
-        </tr>
-      </thead>
-      <tbody id="tasks"></tbody>
-    </table>
-  </div>
-
-  <div class="modal" id="log-modal">
-    <div class="modal-header">
-      <h2 class="modal-title" id="modal-title">Logs</h2>
-      <span class="refresh-note">Auto-refresh: 2s</span>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
-    </div>
-    <div class="modal-content" id="log-content">Loading...</div>
-  </div>
+  </dialog>
 
   <script>
-    let currentLogTaskId = null;
-    let logRefreshInterval = null;
+    const $ = id => document.getElementById(id);
+    const settings = $('settings');
+    let tasks = [];
+    let repos = [];
+    let reposEnabled = false;
+    let selectedId = null;
+    let logTimer = null;
     let lastLogText = '';
 
-    // ============ Token Management ============
+    const store = {
+      get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+      set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} }
+    };
+
+    function esc(v) {
+      return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    const safeUrl = u => /^https?:\/\//.test(u || '') ? u : null;
+
+    function ago(iso) {
+      const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+    function span(ms) {
+      const s = Math.round(ms / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      return Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
+    }
+
+    function authHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = $('api-token').value;
+      if (token) headers.Authorization = 'Bearer ' + token;
+      return headers;
+    }
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { ...opts, headers: authHeaders() });
+      if (res.status === 401) { location.href = '/login'; throw new Error('Signed out'); }
+      return res;
+    }
+
+    // ============ Tasks ============
+
+    const STATUS_LABEL = { running: 'Running', queued: 'Queued', completed: 'Done', failed: 'Failed' };
+
+    async function fetchTasks() {
+      try {
+        tasks = await (await api('/tasks')).json();
+      } catch (e) {
+        return console.error('Failed to load tasks:', e);
+      }
+      renderCounts();
+      renderList();
+      if (selectedId) renderHeader();
+    }
+
+    function renderCounts() {
+      const n = s => tasks.filter(t => s.includes(t.status)).length;
+      const running = n(['running', 'queued']);
+      $('counts').innerHTML =
+        (running ? `<span class="running">${running} running</span>` : '') +
+        `<span>${n(['completed'])} done</span>` +
+        (n(['failed']) ? `<span>${n(['failed'])} failed</span>` : '');
+    }
+
+    function renderList() {
+      if (!tasks.length) {
+        $('tasks').innerHTML = '<p class="empty">No tasks yet. Describe a change above to start one.</p>';
+        return;
+      }
+      $('tasks').innerHTML = tasks.map(t => `
+        <button class="task" onclick="selectTask('${esc(t.id)}')" aria-current="${t.id === selectedId}">
+          <span class="dot ${esc(t.status)}" title="${esc(STATUS_LABEL[t.status] || t.status)}"></span>
+          <span class="task-title">${esc(t.prompt.split('\n')[0])}</span>
+          <span class="task-sub">
+            <span class="repo">${esc(t.repo || 'Repo not picked yet')}</span>
+            ${t.pr_url ? '<span>PR open</span>' : ''}
+            <span class="when">${ago(t.started)}</span>
+          </span>
+        </button>`).join('');
+    }
+
+    function selectTask(id) {
+      selectedId = id;
+      if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+      document.body.classList.add('show-detail');
+      lastLogText = '';
+      $('detail').innerHTML = `<div class="detail-inner">
+          <button class="btn quiet back" onclick="closeTask()">&larr; All tasks</button>
+          <div id="detail-head"></div>
+          <div id="timeline"><p class="note" style="margin-top:32px">Loading run…</p></div>
+        </div>`;
+      renderList();
+      renderHeader();
+      fetchLogs(true);
+      clearInterval(logTimer);
+      logTimer = setInterval(() => fetchLogs(false), 2000);
+    }
+
+    function closeTask() {
+      selectedId = null;
+      clearInterval(logTimer);
+      history.replaceState(null, '', location.pathname);
+      document.body.classList.remove('show-detail');
+      $('detail').innerHTML = '<div class="placeholder">Pick a task to follow what Claude is doing.</div>';
+      renderList();
+    }
+
+    const ERROR_HELP = {
+      auth_expired: 'Claude\'s login on the server has expired. Log in again on the server, then rerun the task.',
+      capacity_reached: 'Claude hit its usage limit. Try again later.',
+      timeout: 'The task ran longer than 1 hour and was stopped.',
+      exit_code: 'Claude stopped with an error. The run below shows the last steps.'
+    };
+
+    function renderHeader() {
+      const t = tasks.find(t => t.id === selectedId);
+      const head = $('detail-head');
+      if (!head) return;
+      if (!t) { head.innerHTML = '<p class="note">This task no longer exists. Tasks are cleared when the runner restarts.</p>'; return; }
+
+      const [first, ...rest] = t.prompt.split('\n');
+      const pr = safeUrl(t.pr_url);
+      const repoUrl = safeUrl(t.repo_url);
+      const ended = t.finished ? new Date(t.finished) : new Date();
+      head.innerHTML = `
+        <div class="head-row">
+          <span class="status ${esc(t.status)}"><span class="dot"></span>${esc(STATUS_LABEL[t.status] || t.status)}</span>
+          ${pr ? `<a class="btn primary" href="${esc(pr)}" target="_blank" rel="noopener">Open pull request</a>` : ''}
+        </div>
+        <h1>${esc(first)}</h1>
+        ${rest.join('\n').trim() ? `<p class="prompt-more">${esc(rest.join('\n').trim())}</p>` : ''}
+        <dl class="facts">
+          <div><dt>Repo</dt><dd>${t.repo ? (repoUrl ? `<a href="${esc(repoUrl)}" target="_blank" rel="noopener">${esc(t.repo)}</a>` : esc(t.repo)) : 'Picked from prompt'}</dd></div>
+          <div><dt>Branch</dt><dd><code>claude/${esc(t.id)}</code></dd></div>
+          <div><dt>Started</dt><dd title="${esc(new Date(t.started).toLocaleString())}">${ago(t.started)}</dd></div>
+          <div><dt>${t.finished ? 'Took' : 'Running for'}</dt><dd>${span(ended - new Date(t.started))}</dd></div>
+        </dl>
+        ${t.status === 'failed' ? `<div class="problem">
+          <p>${esc(ERROR_HELP[t.errorType] || 'The task failed.')}</p>
+          ${t.error ? `<p>${esc(t.error)}</p>` : ''}
+        </div>` : ''}`;
+    }
+
+    // ============ Run timeline (parsed from the stream-json log) ============
+
+    const PHASES = {
+      ORCHESTRATOR: { title: 'Set up', what: 'Find the repo, clone it, install tools, create the branch' },
+      WORKER: { title: 'Work', what: 'Make the change, commit, push and open a pull request' }
+    };
+
+    function toolSummary(b) {
+      const i = b.input || {};
+      const path = i.file_path || i.path || i.notebook_path;
+      // Search tools: what was searched for matters more than where
+      if (i.pattern) return { what: i.pattern, cmd: i.path || i.glob || '' };
+      return {
+        what: i.description || (path ? path.split('/').slice(-2).join('/') : '') || i.url || i.query || i.subagent_type || '',
+        cmd: i.command || (i.description && path) || ''
+      };
+    }
+
+    function resultText(c) {
+      if (Array.isArray(c)) return c.map(x => x.text ?? (x.type === 'image' ? '[image]' : '')).join('\n');
+      return String(c ?? '');
+    }
+
+    function parseLog(text) {
+      const phases = [];
+      const tools = {};
+      let cur = null;
+      for (const raw of text.split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        let m;
+        if ((m = line.match(/^=== (\w+) PHASE ===$/))) { cur = { key: m[1], items: [], done: false }; phases.push(cur); continue; }
+        if ((m = line.match(/^=== (\w+) COMPLETE ===$/))) { const p = phases.find(p => p.key === m[1]); if (p) p.done = true; continue; }
+        if (!cur) continue; // task header (ID / Repo / Prompt) is already shown above the timeline
+        if (line[0] !== '{') { cur.items.push({ kind: 'note', text: line }); continue; }
+        let d;
+        try { d = JSON.parse(line); } catch { cur.items.push({ kind: 'note', text: line }); continue; }
+
+        if (d.type === 'system' && d.subtype === 'init') cur.model = d.model;
+        else if (d.type === 'assistant') {
+          for (const b of d.message?.content || []) {
+            if (b.type === 'text' && b.text.trim()) cur.items.push({ kind: 'say', text: b.text.trim() });
+            else if (b.type === 'tool_use') { tools[b.id] = { kind: 'tool', id: b.id, name: b.name, ...toolSummary(b), out: null, bad: false }; cur.items.push(tools[b.id]); }
+          }
+        } else if (d.type === 'user') {
+          for (const b of d.message?.content || []) {
+            const t = b.type === 'tool_result' && tools[b.tool_use_id];
+            if (t) { t.out = resultText(b.content); t.bad = !!b.is_error; }
+          }
+        } else if (d.type === 'result') {
+          cur.result = { bad: !!d.is_error || String(d.subtype || '').startsWith('error'), text: d.result || '', ms: d.duration_ms, cost: d.total_cost_usd };
+        }
+      }
+      return phases;
+    }
+
+    function renderTimeline(phases, task) {
+      if (!phases.length) return '<p class="note" style="margin-top:32px">Waiting for Claude to start…</p>';
+      const live = task?.status === 'running';
+      return phases.map((p, pi) => {
+        const info = PHASES[p.key] || { title: p.key.toLowerCase(), what: '' };
+        const isLast = pi === phases.length - 1;
+        const failed = p.result?.bad || (!p.done && !live && task?.status === 'failed' && isLast);
+        const state = p.done || (p.result && !p.result.bad) ? '<span class="state ok">Finished</span>'
+          : failed ? '<span class="state fail">Failed</span>'
+          : live && isLast ? '<span class="state">In progress</span>' : '';
+        const steps = p.items.map((it, ii) => {
+          const liveCls = live && isLast && !p.result && ii === p.items.length - 1 ? ' live' : '';
+          if (it.kind === 'say') return `<li class="step say${liveCls}"><p class="say-text">${esc(it.text)}</p></li>`;
+          if (it.kind === 'note') return `<li class="step${liveCls}"><p class="note">${esc(it.text)}</p></li>`;
+          const hasOut = it.out !== null && it.out.trim() !== '';
+          return `<li class="step${it.bad ? ' bad' : ''}${liveCls}">
+            <details class="tool${hasOut ? ' has-output' : ''}" data-id="${esc(it.id)}">
+              <summary${hasOut ? '' : ' tabindex="-1"'}>
+                <span class="tool-name">${esc(it.name)}</span>
+                <span class="tool-what">${esc(it.what)}</span>
+                ${it.cmd ? `<code class="tool-cmd">${esc(it.cmd)}</code>` : ''}
+              </summary>
+              ${hasOut ? `<pre class="tool-out${it.bad ? ' bad' : ''}">${esc(it.out.length > 20000 ? it.out.slice(0, 20000) + '\n…' : it.out)}</pre>` : ''}
+            </details>
+          </li>`;
+        }).join('');
+        const outcome = p.result ? `<div class="outcome${p.result.bad ? ' bad' : ''}">
+            ${p.result.text ? `<p class="outcome-text">${esc(p.result.text)}</p>` : ''}
+            <div class="outcome-meta">
+              ${p.result.ms ? `<span>Took ${span(p.result.ms)}</span>` : ''}
+              ${p.result.cost != null ? `<span>Cost $${Number(p.result.cost).toFixed(2)}</span>` : ''}
+              ${p.model ? `<span>${esc(p.model)}</span>` : ''}
+            </div>
+          </div>` : '';
+        return `<section class="phase">
+            <div class="phase-head"><h2>${esc(info.title)}</h2><span class="what">${esc(info.what)}</span>${state}</div>
+            ${steps ? `<ol class="steps">${steps}</ol>` : ''}
+            ${outcome}
+          </section>`;
+      }).join('');
+    }
+
+    async function fetchLogs(first) {
+      const id = selectedId;
+      const task = tasks.find(t => t.id === id);
+      // Finished runs don't change: load once, then stop polling
+      if (!first && task && task.status !== 'running' && task.status !== 'queued' && lastLogText) return;
+      let text;
+      try {
+        const res = await api('/task/' + encodeURIComponent(id) + '/logs');
+        if (!res.ok) throw new Error(res.status === 404 ? 'This task no longer exists.' : 'HTTP ' + res.status);
+        text = await res.text();
+      } catch (e) {
+        if (id === selectedId && $('timeline')) $('timeline').innerHTML = `<div class="problem"><p>Couldn't load this run: ${esc(e.message)}</p></div>`;
+        return;
+      }
+      if (id !== selectedId || text === lastLogText) return;
+      if (String(window.getSelection() || '').length) return; // don't re-render under an active text selection
+
+      const scroller = $('detail');
+      const atBottom = scroller.scrollHeight - scroller.scrollTop <= scroller.clientHeight + 60;
+      const open = new Set([...document.querySelectorAll('details.tool[open]')].map(d => d.dataset.id));
+      lastLogText = text;
+      $('timeline').innerHTML = renderTimeline(parseLog(text), task);
+      open.forEach(oid => document.querySelector(`details.tool[data-id="${CSS.escape(oid)}"]`)?.setAttribute('open', ''));
+      if (atBottom && !first) scroller.scrollTop = scroller.scrollHeight;
+    }
+
+    // ============ Composer ============
+
+    async function submitTask(e) {
+      e?.preventDefault();
+      const prompt = $('prompt').value.trim();
+      const repo = $('repo').value.trim();
+      if (!prompt) return $('prompt').focus();
+      if (repo && reposEnabled && !repos.some(r => r.full_name === repo)) {
+        setHint(`${repo} isn't one of your Gitea repos. Pick one from the list, or clear the field.`, true);
+        return $('repo').focus();
+      }
+      const btn = $('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+      try {
+        const res = await api('/task', { method: 'POST', body: JSON.stringify(repo ? { prompt, repo } : { prompt }) });
+        const data = await res.json();
+        if (!data.id) throw new Error(data.error || 'The runner didn\'t start the task.');
+        $('prompt').value = '';
+        await fetchTasks();
+        selectTask(data.id);
+      } catch (err) {
+        setHint('Couldn\'t start the task: ' + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run task';
+      }
+    }
+
+    $('prompt').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitTask(e);
+    });
+
+    function setHint(html, isError = false) {
+      $('repo-hint').innerHTML = html;
+      $('repo-hint').classList.toggle('error', isError);
+    }
+
+    async function fetchRepos(refresh = false) {
+      try {
+        const data = await (await api('/api/repos' + (refresh ? '?refresh=1' : ''))).json();
+        reposEnabled = data.enabled;
+        if (!data.enabled) return setHint('Claude picks the repo from your prompt.');
+        $('repo-row').hidden = false;
+        if (data.error) return setHint('Couldn\'t load your Gitea repos: ' + esc(data.error), true);
+        repos = data.repos;
+        $('repo-options').innerHTML = repos.map(r =>
+          `<option value="${esc(r.full_name)}">${esc([r.description, r.private ? 'private' : '', r.archived ? 'archived' : ''].filter(Boolean).join(', '))}</option>`).join('');
+        if (!$('repo').value) $('repo').value = store.get('selected_repo');
+        onRepoInput();
+      } catch (e) {
+        setHint('Couldn\'t load your Gitea repos: ' + esc(e.message), true);
+      }
+    }
+
+    function onRepoInput() {
+      const value = $('repo').value.trim();
+      const repo = repos.find(r => r.full_name === value);
+      if (repo || !value) store.set('selected_repo', value);
+      if (repo) {
+        const url = safeUrl(repo.html_url);
+        setHint(`Branches from <code>${esc(repo.default_branch)}</code>${url ? `, <a href="${esc(url)}" target="_blank" rel="noopener">view repo</a>` : ''}`);
+      } else if (value) {
+        const n = repos.filter(r => r.full_name.toLowerCase().includes(value.toLowerCase())).length;
+        setHint(n ? `${n} matching repo${n > 1 ? 's' : ''}. Pick one from the list.` : 'No repo matches.', !n);
+      } else {
+        setHint(`Claude picks one of your ${repos.length} repos from the prompt.`);
+      }
+    }
+
+    // ============ API token ============
+
+    function openSettings() {
+      $('new-token').hidden = true;
+      fetchTokenStatus();
+      settings.showModal();
+    }
 
     async function fetchTokenStatus() {
       try {
-        const res = await fetch('/token');
-        const data = await res.json();
-        const statusEl = document.getElementById('token-status');
-        const revokeBtn = document.getElementById('revoke-btn');
-
-        if (data.exists) {
-          statusEl.innerHTML = `<span style="color: #3fb950;">Active token:</span> <code>${data.masked}</code>`;
-          revokeBtn.style.display = 'inline-block';
-        } else {
-          statusEl.innerHTML = '<span style="color: #8b949e;">No token configured - API is unprotected</span>';
-          revokeBtn.style.display = 'none';
-        }
+        const data = await (await api('/token')).json();
+        $('token-status').innerHTML = data.exists
+          ? `Active token <code>${esc(data.masked)}</code>`
+          : 'No token yet. The API only accepts signed-in browser sessions.';
+        $('revoke-btn').hidden = !data.exists;
       } catch (e) {
-        document.getElementById('token-status').textContent = 'Error loading token status';
+        $('token-status').textContent = 'Couldn\'t check the token: ' + e.message;
       }
     }
 
     async function generateToken() {
-      if (!confirm('This will replace any existing token. Continue?')) return;
-
+      if (!confirm('Generate a new token? Anything using the current token will stop working.')) return;
       try {
-        const res = await fetch('/token/generate', { method: 'POST' });
-        const data = await res.json();
-
-        // Show new token
-        document.getElementById('new-token-value').textContent = data.token;
-        document.getElementById('new-token-display').style.display = 'block';
-
-        // Auto-fill the input
-        document.getElementById('api-token').value = data.token;
-        localStorage.setItem('api_token', data.token);
-
+        const data = await (await api('/token/generate', { method: 'POST' })).json();
+        $('new-token-value').textContent = data.token;
+        $('new-token').hidden = false;
+        $('copy-btn').textContent = 'Copy token';
+        $('api-token').value = data.token;
+        store.set('api_token', data.token);
         fetchTokenStatus();
       } catch (e) {
-        alert('Failed to generate token: ' + e.message);
+        $('token-status').textContent = 'Couldn\'t generate a token: ' + e.message;
       }
     }
 
     async function revokeToken() {
-      if (!confirm('This will disable API authentication. Continue?')) return;
-
+      if (!confirm('Revoke the token? Anything using it will stop working.')) return;
       try {
-        await fetch('/token', { method: 'DELETE' });
-        document.getElementById('new-token-display').style.display = 'none';
-        document.getElementById('api-token').value = '';
-        localStorage.removeItem('api_token');
+        await api('/token', { method: 'DELETE' });
+        $('new-token').hidden = true;
+        $('api-token').value = '';
+        store.set('api_token', '');
         fetchTokenStatus();
       } catch (e) {
-        alert('Failed to revoke token: ' + e.message);
+        $('token-status').textContent = 'Couldn\'t revoke the token: ' + e.message;
       }
     }
 
-    function copyToken() {
-      const token = document.getElementById('new-token-value').textContent;
-      navigator.clipboard.writeText(token);
-      alert('Token copied to clipboard!');
+    async function copyToken() {
+      try {
+        await navigator.clipboard.writeText($('new-token-value').textContent);
+        $('copy-btn').textContent = 'Copied';
+      } catch {
+        $('copy-btn').textContent = 'Select and copy it manually';
+      }
     }
 
-    function getAuthHeaders() {
-      const token = document.getElementById('api-token')?.value;
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = 'Bearer ' + token;
-      return headers;
-    }
+    $('api-token').value = store.get('api_token');
+    $('api-token').addEventListener('change', e => store.set('api_token', e.target.value));
 
-    // ============ User Management ============
+    // ============ Session ============
 
     async function fetchCurrentUser() {
       try {
-        const res = await fetch('/api/me');
-        if (res.status === 401) {
-          window.location.href = '/login';
-          return;
-        }
-        const data = await res.json();
-        document.getElementById('username').textContent = data.username;
+        const data = await (await api('/api/me')).json();
+        $('username').textContent = data.username;
       } catch (e) {
-        console.error('Failed to fetch user:', e);
+        console.error('Failed to load user:', e);
       }
     }
 
     async function logout() {
-      try {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login';
-      } catch (e) {
-        console.error('Logout failed:', e);
-        window.location.href = '/login';
-      }
-    }
-
-    async function fetchTasks() {
-      try {
-        const res = await fetch('/tasks', { headers: getAuthHeaders() });
-        if (res.status === 401) {
-          window.location.href = '/login';
-          return;
-        }
-        const tasks = await res.json();
-
-        let running = 0, completed = 0, failed = 0;
-        tasks.forEach(t => {
-          if (t.status === 'running' || t.status === 'queued') running++;
-          else if (t.status === 'completed') completed++;
-          else if (t.status === 'failed') failed++;
-        });
-
-        document.getElementById('running').textContent = running;
-        document.getElementById('completed').textContent = completed;
-        document.getElementById('failed').textContent = failed;
-
-        const tbody = document.getElementById('tasks');
-        if (tasks.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">No tasks yet</td></tr>';
-        } else {
-          tbody.innerHTML = tasks.map(t => `
-            <tr>
-              <td><code>${t.id}</code></td>
-              <td>${t.repo ? (t.repo_url ? `<a href="${escapeHtml(t.repo_url)}" target="_blank">${escapeHtml(t.repo)}</a>` : escapeHtml(t.repo)) : '<span style="color:#8b949e">auto</span>'}</td>
-              <td class="prompt" title="${escapeHtml(t.prompt)}">${escapeHtml(t.prompt.slice(0, 60))}${t.prompt.length > 60 ? '...' : ''}</td>
-              <td><span class="status ${t.status}">${t.status}</span></td>
-              <td>${new Date(t.started).toLocaleString()}</td>
-              <td>${t.pr_url ? `<a href="${t.pr_url}" target="_blank">View PR</a>` : '-'}</td>
-              <td><button class="log-btn" onclick="showLogs('${t.id}')">View</button></td>
-            </tr>
-          `).join('');
-        }
-      } catch (e) {
-        console.error('Failed to fetch tasks:', e);
-      }
-    }
-
-    function escapeHtml(str) {
-      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    async function submitTask() {
-      const prompt = document.getElementById('prompt').value.trim();
-      if (!prompt) return alert('Enter a prompt');
-      const repo = document.getElementById('repo-select').value || null;
-
-      const btn = document.getElementById('submit-btn');
-      btn.disabled = true;
-      btn.textContent = 'Submitting...';
-
-      try {
-        const res = await fetch('/task', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(repo ? { prompt, repo } : { prompt })
-        });
-        const data = await res.json();
-        if (data.id) {
-          document.getElementById('prompt').value = '';
-          fetchTasks();
-        } else {
-          alert('Error: ' + (data.error || 'Unknown'));
-        }
-      } catch (e) {
-        alert('Failed: ' + e.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Submit Task';
-      }
-    }
-
-    // ============ Repo Selection (Gitea) ============
-
-    let repos = [];
-
-    async function fetchRepos(refresh = false) {
-      const info = document.getElementById('repo-info');
-      try {
-        const res = await fetch('/api/repos' + (refresh ? '?refresh=1' : ''), { headers: getAuthHeaders() });
-        const data = await res.json();
-        if (!data.enabled) return; // Gitea not configured: keep auto-detect-only behaviour
-        document.getElementById('repo-section').style.display = 'block';
-        if (data.error) {
-          info.textContent = 'Failed to load Gitea repos: ' + data.error;
-          return;
-        }
-        repos = data.repos;
-        renderRepoOptions();
-      } catch (e) {
-        info.textContent = 'Failed to load Gitea repos: ' + e.message;
-      }
-    }
-
-    function renderRepoOptions() {
-      const select = document.getElementById('repo-select');
-      const previous = select.value || localStorage.getItem('selected_repo') || '';
-      const filter = document.getElementById('repo-filter').value.trim().toLowerCase();
-      // The selected repo always stays listed, so filtering never silently switches to auto-detect
-      const matches = repos.filter(r => !filter || r.full_name === previous ||
-        r.full_name.toLowerCase().includes(filter) ||
-        r.description.toLowerCase().includes(filter));
-
-      const options = ['<option value="">Auto-detect repo from prompt</option>'];
-      const byOwner = {};
-      matches.forEach(r => (byOwner[r.owner] ||= []).push(r));
-      for (const owner of Object.keys(byOwner).sort()) {
-        options.push(`<optgroup label="${escapeHtml(owner)}">`);
-        for (const r of byOwner[owner]) {
-          const flags = (r.private ? ' 🔒' : '') + (r.archived ? ' (archived)' : '');
-          options.push(`<option value="${escapeHtml(r.full_name)}">${escapeHtml(r.full_name)}${flags}</option>`);
-        }
-        options.push('</optgroup>');
-      }
-      select.innerHTML = options.join('');
-
-      if (previous && matches.some(r => r.full_name === previous)) {
-        select.value = previous;
-      } else if (filter && matches.length === 1) {
-        select.value = matches[0].full_name;
-      }
-      onRepoChange();
-    }
-
-    function onRepoChange(fromUser = false) {
-      const value = document.getElementById('repo-select').value;
-      const info = document.getElementById('repo-info');
-      if (fromUser) localStorage.setItem('selected_repo', value);
-      const repo = repos.find(r => r.full_name === value);
-      if (repo) {
-        info.innerHTML = `<a href="${escapeHtml(repo.html_url)}" target="_blank">${escapeHtml(repo.full_name)}</a>` +
-          ` &middot; base: <code>${escapeHtml(repo.default_branch)}</code>` +
-          (repo.description ? ` &middot; ${escapeHtml(repo.description)}` : '');
-      } else {
-        info.textContent = `${repos.length} Gitea repos available. No repo selected - the orchestrator will pick one of them from your prompt.`;
-      }
-    }
-
-    function formatLogEntry(line) {
-      // Phase headers
-      if (line.startsWith('===')) {
-        return `<div class="log-entry phase">${escapeHtml(line)}</div>`;
-      }
-
-      // Plain text lines (task info)
-      if (!line.startsWith('{')) {
-        if (line.trim()) {
-          return `<div class="log-entry raw">${escapeHtml(line)}</div>`;
-        }
-        return '';
-      }
-
-      try {
-        const data = JSON.parse(line);
-
-        if (data.type === 'system' && data.subtype === 'init') {
-          return `<div class="log-entry system">
-            <div class="log-type">System Init</div>
-            <div class="log-text">Model: ${data.model || 'unknown'}</div>
-            <div class="log-meta">Tools: ${(data.tools || []).length} | MCP: ${(data.mcp_servers || []).length} servers</div>
-          </div>`;
-        }
-
-        if (data.type === 'assistant') {
-          const content = data.message?.content || [];
-          let html = '<div class="log-entry assistant"><div class="log-type">Assistant</div>';
-
-          for (const block of content) {
-            if (block.type === 'text') {
-              html += `<div class="log-text">${escapeHtml(block.text)}</div>`;
-            } else if (block.type === 'tool_use') {
-              const input = block.input || {};
-              const desc = input.description || input.command || input.pattern || input.file_path || '';
-              html += `<div class="log-text"><span class="log-tool">${block.name}</span> ${escapeHtml(String(desc).slice(0, 100))}</div>`;
-            }
-          }
-          html += '</div>';
-          return html;
-        }
-
-        if (data.type === 'user') {
-          const content = data.message?.content || [];
-          let html = '<div class="log-entry user"><div class="log-type">Tool Result</div>';
-
-          for (const block of content) {
-            if (block.type === 'tool_result') {
-              const result = block.content || '';
-              const preview = String(result).slice(0, 300);
-              html += `<div class="log-text">${escapeHtml(preview)}${result.length > 300 ? '...' : ''}</div>`;
-            }
-          }
-          html += '</div>';
-          return html;
-        }
-
-        if (data.type === 'result') {
-          const isError = data.is_error || data.subtype === 'error';
-          return `<div class="log-entry result ${isError ? 'error' : ''}">
-            <div class="log-type">${isError ? 'Error' : 'Complete'}</div>
-            <div class="log-text">${escapeHtml(String(data.result || '').slice(0, 500))}</div>
-            <div class="log-meta">Duration: ${Math.round((data.duration_ms || 0) / 1000)}s | <span class="log-cost">Cost: $${(data.total_cost_usd || 0).toFixed(4)}</span></div>
-          </div>`;
-        }
-
-        // Fallback for unknown types
-        return `<div class="log-entry raw">${escapeHtml(line.slice(0, 200))}...</div>`;
-      } catch (e) {
-        return `<div class="log-entry raw">${escapeHtml(line)}</div>`;
-      }
-    }
-
-    async function fetchLogs(id) {
-      try {
-        const res = await fetch('/task/' + id + '/logs', { headers: getAuthHeaders() });
-        const text = await res.text();
-
-        // Skip update if content hasn't changed
-        if (text === lastLogText) {
-          return;
-        }
-
-        // Skip update if user is selecting text (check AFTER fetch to avoid race condition)
-        const selection = window.getSelection();
-        if (selection && selection.toString().length > 0) {
-          return;
-        }
-
-        lastLogText = text;
-
-        const content = document.getElementById('log-content');
-        const wasAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 50;
-
-        if (!text) {
-          content.innerHTML = '<div class="log-entry raw">(no logs yet)</div>';
-          return;
-        }
-
-        const lines = text.split('\n').filter(l => l.trim());
-        const formatted = lines.map(formatLogEntry).join('');
-        content.innerHTML = formatted;
-
-        if (wasAtBottom) {
-          content.scrollTop = content.scrollHeight;
-        }
-      } catch (e) {
-        document.getElementById('log-content').innerHTML = '<div class="log-entry result error">Error loading logs: ' + escapeHtml(e.message) + '</div>';
-      }
-    }
-
-    async function showLogs(id) {
-      currentLogTaskId = id;
-      lastLogText = '';
-      document.getElementById('modal-title').textContent = 'Logs: ' + id;
-      document.getElementById('log-content').textContent = 'Loading...';
-      document.getElementById('log-modal').classList.add('open');
-
-      await fetchLogs(id);
-      document.getElementById('log-content').scrollTop = document.getElementById('log-content').scrollHeight;
-
-      if (logRefreshInterval) clearInterval(logRefreshInterval);
-      logRefreshInterval = setInterval(() => fetchLogs(id), 2000);
-    }
-
-    function closeModal() {
-      document.getElementById('log-modal').classList.remove('open');
-      currentLogTaskId = null;
-      lastLogText = '';
-      if (logRefreshInterval) {
-        clearInterval(logRefreshInterval);
-        logRefreshInterval = null;
-      }
+      try { await fetch('/api/logout', { method: 'POST' }); } finally { location.href = '/login'; }
     }
 
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeModal();
+      if (e.key === 'Escape' && selectedId && !settings.open && document.activeElement?.tagName !== 'TEXTAREA') closeTask();
     });
-
-    // Load saved token from localStorage
-    const tokenInput = document.getElementById('api-token');
-    tokenInput.value = localStorage.getItem('api_token') || '';
-    tokenInput.addEventListener('change', () => {
-      localStorage.setItem('api_token', tokenInput.value);
+    window.addEventListener('hashchange', () => {
+      const id = location.hash.slice(1);
+      if (id && id !== selectedId) selectTask(id);
     });
 
     fetchCurrentUser();
-    fetchTokenStatus();
     fetchRepos();
-    fetchTasks();
+    fetchTasks().then(() => {
+      const id = location.hash.slice(1);
+      if (id) selectTask(id);
+    });
     setInterval(fetchTasks, 5000);
   </script>
 </body>

@@ -100,11 +100,6 @@ async function requireAuth(req, res, next) {
     return next();
   }
 
-  // Allow token management endpoints (protected by being first-time setup or showing masked values)
-  if (req.path === '/token' || req.path === '/token/generate') {
-    return next();
-  }
-
   // Allow health check for external monitoring
   if (req.path === '/health') {
     return next();
@@ -125,7 +120,7 @@ async function requireAuth(req, res, next) {
   }
 
   // Not authenticated
-  if (req.path.startsWith('/api/') || req.path.startsWith('/task')) {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/task') || req.path.startsWith('/token')) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   return res.redirect('/login');
