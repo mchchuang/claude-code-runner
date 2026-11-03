@@ -3,105 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login - Claude Runner</title>
+  <title>Sign in · Claude Runner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    /* Same tokens as dashboard.html */
+    :root {
+      --bg: #f5f6f8; --surface: #ffffff; --line: #e1e4e9; --ink: #15171c; --muted: #687082;
+      --accent: #3b5bdb; --accent-soft: #e8edfd; --fail: #cf3a3a; --fail-soft: #fbe9e9;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e0f12; --surface: #16181c; --line: #272a31; --ink: #e9eaee; --muted: #8e93a0;
+        --accent: #8b9df7; --accent-soft: #1f2540; --fail: #f07a7a; --fail-soft: #331a1c;
+        color-scheme: dark;
+      }
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-      background: #0d1117;
-      color: #c9d1d9;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
+      min-height: 100vh; display: grid; place-items: center; padding: 16px;
+      font: 14px/1.5 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased;
     }
-    .login-container {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 40px;
-      width: 100%;
-      max-width: 400px;
-    }
-    h1 {
-      color: #58a6ff;
-      margin-bottom: 8px;
-      text-align: center;
-    }
-    .subtitle {
-      color: #8b949e;
-      text-align: center;
-      margin-bottom: 30px;
-      font-size: 14px;
-    }
-    .form-group {
-      margin-bottom: 20px;
-    }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      color: #8b949e;
-      font-size: 14px;
-    }
+    main { width: min(360px, 100%); }
+    h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; }
+    .lede { color: var(--muted); margin: 4px 0 24px; }
+    form { display: grid; gap: 14px; }
+    label { display: grid; gap: 6px; font-weight: 500; }
+    label small { color: var(--muted); font-weight: 400; }
     input {
-      width: 100%;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #c9d1d9;
-      padding: 12px;
-      font-size: 14px;
+      height: 36px; padding: 0 10px; font: inherit; color: inherit;
+      border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
     }
-    input:focus {
-      outline: none;
-      border-color: #58a6ff;
-    }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     button {
-      width: 100%;
-      background: #238636;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 12px;
-      font-size: 14px;
-      cursor: pointer;
-      margin-top: 10px;
+      height: 36px; margin-top: 4px; font: inherit; font-weight: 500; cursor: pointer;
+      border: 0; border-radius: 7px; background: var(--ink); color: var(--bg);
     }
-    button:hover { background: #2ea043; }
-    button:disabled { background: #30363d; cursor: not-allowed; }
-    .error {
-      background: #f8514922;
-      border: 1px solid #f85149;
-      color: #f85149;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 20px;
-      font-size: 14px;
-      display: none;
-    }
-    .error.show { display: block; }
+    button:hover { opacity: .88; }
+    button:disabled { opacity: .5; cursor: default; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .error { padding: 10px 12px; border-radius: 7px; background: var(--fail-soft); color: var(--fail); }
   </style>
 </head>
 <body>
-  <div class="login-container">
+  <main>
     <h1>Claude Runner</h1>
-    <p class="subtitle">Sign in to continue</p>
-
-    <div class="error" id="error"></div>
+    <p class="lede">Sign in to run and follow tasks.</p>
 
     <form id="login-form" onsubmit="handleLogin(event)">
-      <div class="form-group">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" required autocomplete="username">
-      </div>
-      <div class="form-group">
-        <label for="password">Password</label>
+      <p class="error" id="error" role="alert" hidden></p>
+      <label>Username
+        <input type="text" id="username" name="username" required autocomplete="username" autofocus>
+      </label>
+      <label>Password
         <input type="password" id="password" name="password" required autocomplete="current-password">
-      </div>
-      <button type="submit" id="submit-btn">Sign In</button>
+      </label>
+      <button type="submit" id="submit-btn">Sign in</button>
     </form>
-  </div>
+  </main>
 
   <script>
     async function handleLogin(e) {
@@ -112,9 +74,9 @@
       const btn = document.getElementById('submit-btn');
       const error = document.getElementById('error');
 
-      error.classList.remove('show');
+      error.hidden = true;
       btn.disabled = true;
-      btn.textContent = 'Signing in...';
+      btn.textContent = 'Signing in…';
 
       try {
         const res = await fetch('/api/login', {
@@ -128,15 +90,15 @@
         if (res.ok && data.success) {
           window.location.href = '/';
         } else {
-          error.textContent = data.error || 'Login failed';
-          error.classList.add('show');
+          error.textContent = data.error || 'Wrong username or password.';
+          error.hidden = false;
         }
       } catch (err) {
-        error.textContent = 'Connection failed: ' + err.message;
-        error.classList.add('show');
+        error.textContent = 'Couldn\'t reach the runner: ' + err.message;
+        error.hidden = false;
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Sign In';
+        btn.textContent = 'Sign in';
       }
     }
   </script>
