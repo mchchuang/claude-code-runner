@@ -1,6 +1,9 @@
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y \
+# Quiet apt: no debconf prompts/warnings, no per-package progress in build logs
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq && apt-get install -y -qq \
     git \
     curl \
     ssh \
@@ -8,15 +11,16 @@ RUN apt-get update && apt-get install -y \
     make \
     g++ \
     jq \
-    && rm -rf /var/lib/apt/lists/*
+    > /dev/null && rm -rf /var/lib/apt/lists/*
 
 # gh CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg status=none \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y gh
+    && apt-get update -qq && apt-get install -y -qq gh > /dev/null && rm -rf /var/lib/apt/lists/*
 
-# Claude Code
-RUN npm install -g @anthropic-ai/claude-code
+# Claude Code. CI passes the current npm version so only this layer rebuilds when a new release ships.
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Create ~/.claude directory for Claude Code credentials and runtime files
 # Only .credentials.json is mounted from host; other files stay in container
@@ -24,7 +28,7 @@ RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
 
 WORKDIR /app
 COPY package.json ./
-RUN npm install
+RUN npm install --no-fund --no-audit --loglevel=error
 COPY src ./src
 
 # Give node user ownership of app
