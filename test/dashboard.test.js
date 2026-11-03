@@ -379,6 +379,23 @@ describe('task detail', () => {
     p.close();
   });
 
+  test('the status row with the PR button stays pinned to the top of the scrolling detail pane', async () => {
+    const t = task({ pr_url: 'https://git.test/pr/7' });
+    const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': LOG } });
+    p.run(`selectTask('abc12345')`);
+    await settle();
+    const row = p.$('detail-head').querySelector('.head-row');
+    assert.ok(row.querySelector('a.btn.primary'));
+    const css = p.window.getComputedStyle(row);
+    assert.equal(css.position, 'sticky');
+    assert.equal(css.top, '0px');
+    // A sticky box can't leave its parent's box: #detail-head must not generate one, so the
+    // row is bounded by .detail-inner (which also holds the timeline) and stays pinned.
+    assert.equal(p.window.getComputedStyle(p.$('detail-head')).display, 'contents');
+    assert.ok(p.$('detail-head').parentElement.contains(p.$('timeline')));
+    p.close();
+  });
+
   test('does not link unsafe PR or repo URLs and handles an unpicked repo and unknown errors', async () => {
     const t = task({ status: 'failed', errorType: 'weird', pr_url: 'javascript:alert(1)', repo_url: 'javascript:alert(2)', finished: null });
     const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': '' } });

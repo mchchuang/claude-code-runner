@@ -146,7 +146,14 @@
     .facts { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted); font-size: 13px; margin: 14px 0 0; }
     .facts dt { display: inline; }
     .facts dd { display: inline; color: var(--ink); margin-left: 6px; }
-    .head-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    /* #detail-head generates no box, so the sticky .head-row is bounded by .detail-inner and
+       stays pinned while the timeline scrolls, keeping "Open pull request" in reach. */
+    #detail-head { display: contents; }
+    .head-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      position: sticky; top: 0; z-index: 2;
+      margin: 0 -8px; padding: 8px; background: var(--bg);
+    }
     .head-row .btn { margin-left: auto; }
     .problem { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--fail-soft); color: var(--fail); }
     .problem p + p { margin-top: 4px; color: var(--ink); opacity: .8; }
