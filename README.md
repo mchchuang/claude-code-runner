@@ -64,8 +64,9 @@ This fork can target repos hosted on a Gitea instance. Set `GITEA_URL` and `GITE
 and the dashboard shows a filterable dropdown of every repo the token's user can access
 (own, collaborator and org repos). Pick one before submitting and the task runs against
 that exact repo: the orchestrator clones it directly (no guessing from the prompt) and the
-worker opens its PR on Gitea via the API. Leave the dropdown on "Auto-detect" to keep the
-original GitHub behaviour.
+worker opens its PR on Gitea via the API. Leave the dropdown on "Auto-detect" and the
+orchestrator picks a Gitea repo from your prompt instead. Without `GITEA_URL`/`GITEA_TOKEN`,
+auto-detect uses the original GitHub behaviour.
 
 The Gitea token needs read/write access to repositories (`write:repository`) and
 `read:user`/`read:organization` to list repos.
@@ -184,7 +185,7 @@ See [`integrations/clawdbot/SKILL.md`](integrations/clawdbot/SKILL.md) for compl
 
 ## Requirements
 
-- `GITHUB_TOKEN` with repo scope (for GitHub / auto-detect tasks)
+- `GITHUB_TOKEN` with repo scope (for GitHub tasks; not needed when Gitea is configured)
 - `GITEA_URL` + `GITEA_TOKEN` (for Gitea repo selection)
 - Claude authentication from your host machine
 

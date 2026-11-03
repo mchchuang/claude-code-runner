@@ -198,6 +198,20 @@ async function getGiteaRepo(fullName) {
   return toRepoSummary(await giteaFetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`));
 }
 
+// Auto-detect mode: find which Gitea repo the orchestrator cloned, from its origin URL.
+async function resolveGiteaRepoFromClone(repoDir) {
+  const origin = await new Promise((resolve, reject) =>
+    execFile('git', ['-C', repoDir, 'remote', 'get-url', 'origin'], (err, out) => err ? reject(err) : resolve(out.trim())));
+  const strip = u => u.replace(/\.git$/, '').replace(/\/+$/, '');
+  const fullName = strip(new URL(origin).pathname).split('/').filter(Boolean).slice(-2).join('/');
+  const repo = await getGiteaRepo(fullName);
+  // Same owner/name could exist elsewhere (e.g. GitHub upstream) - only accept a matching clone URL
+  if (strip(repo.clone_url) !== strip(origin) && !strip(origin).startsWith(GITEA_URL + '/')) {
+    throw new Error(`origin ${origin} is not ${repo.full_name} on Gitea`);
+  }
+  return repo;
+}
+
 // Configure git so clones/pushes to Gitea authenticate with GITEA_TOKEN
 // (reads the token from the environment at call time, never written to disk).
 if (giteaEnabled) {
@@ -369,6 +383,7 @@ You are on branch ${branchName}. It's already pushed to origin.
 - NEVER use AskUserQuestion - you will hang forever
 - NEVER exit without pushing your commits
 - Make reasonable assumptions, document them in commits
+- NEVER commit dependencies or build output (node_modules, venv, dist, etc.) - if the repo has no .gitignore covering them, add one before committing
 
 ## Context Management
 Your context window is precious. DO NOT run more than 3-4 search commands yourself.
@@ -423,10 +438,14 @@ You are an orchestrator. Your job is to:
 3. Create and push a feature branch
 
 Workflow:
-1. Configure git to use the GitHub token:
+${giteaEnabled ? `1. Git credentials for ${GITEA_URL} are already configured - do not change git credential settings.
+2. List repos via the Gitea API and identify the right one from the user's prompt:
+   curl -sf "$GITEA_URL/api/v1/user/repos?limit=50" -H "Authorization: token $GITEA_TOKEN" | jq -r '.[] | [.full_name, .clone_url, .description] | @tsv'
+   (add &page=2 etc. if 50 are returned)
+3. Clone the HTTPS clone_url to ${workDir}/repo` : `1. Configure git to use the GitHub token:
    git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
 2. Use gh CLI to list repos and identify the right one from the user's prompt
-3. Clone to ${workDir}/repo
+3. Clone to ${workDir}/repo`}
 4. Examine the repo to identify required tools (check README, config files, lock files)
 5. Check what tools are already available, install anything missing
 6. Run dependency installation (npm install, pip install, go mod download, etc.)
@@ -558,6 +577,17 @@ async function runTask(id, prompt, taskDir, repo) {
   await runOrchestrator(id, prompt, taskDir, branchName, logFile, repo);
   await appendFile(logFile, `\n=== ORCHESTRATOR COMPLETE ===\n\n`);
 
+  if (!repo && giteaEnabled) {
+    try {
+      repo = await resolveGiteaRepoFromClone(repoDir);
+      tasks.set(id, { ...tasks.get(id), repo: repo.full_name, repo_url: repo.html_url });
+      await appendFile(logFile, `Repo (auto-detected): ${repo.full_name}\n\n`);
+    } catch (err) {
+      // Not a Gitea clone: worker falls back to the GitHub PR flow
+      await appendFile(logFile, `Could not resolve Gitea repo from clone: ${err.message}\n\n`);
+    }
+  }
+
   // Phase 2: Worker - run in cloned repo
   await appendFile(logFile, `=== WORKER PHASE ===\n`);
   const result = await runWorker(id, prompt, repoDir, branchName, logFile, repo);
@@ -658,11 +688,12 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
       logStream.end();
 
       // Parse PR URL from worker output (Gitea uses /pulls/N, GitHub uses /pull/N)
+      // Gitea builds html_url from its ROOT_URL, which can differ from GITEA_URL, so anchor on the repo's own URL
       const prPattern = repo
-        ? new RegExp(`${escapeRegExp(GITEA_URL)}/[^\\s"'\\\\]+/pulls/\\d+`, 'g')
+        ? new RegExp(`${escapeRegExp(repo.html_url.replace(/\/+$/, ''))}/pulls/\\d+`, 'g')
         : /https:\/\/github\.com\/[^\s"'\\]+\/pull\/\d+/g;
-      // Ignore API URLs (e.g. .../api/v1/repos/o/r/pulls/1); prefer the last web URL printed
-      const prUrls = (output.match(prPattern) || []).filter(u => !u.includes('/api/v1/'));
+      // Prefer the last PR URL printed
+      const prUrls = output.match(prPattern) || [];
       const prMatch = prUrls.length ? [prUrls[prUrls.length - 1]] : null;
 
       const task = tasks.get(id);

@@ -497,7 +497,8 @@
       const select = document.getElementById('repo-select');
       const previous = select.value || localStorage.getItem('selected_repo') || '';
       const filter = document.getElementById('repo-filter').value.trim().toLowerCase();
-      const matches = repos.filter(r => !filter ||
+      // The selected repo always stays listed, so filtering never silently switches to auto-detect
+      const matches = repos.filter(r => !filter || r.full_name === previous ||
         r.full_name.toLowerCase().includes(filter) ||
         r.description.toLowerCase().includes(filter));
 
@@ -532,7 +533,7 @@
           ` &middot; base: <code>${escapeHtml(repo.default_branch)}</code>` +
           (repo.description ? ` &middot; ${escapeHtml(repo.description)}` : '');
       } else {
-        info.textContent = `${repos.length} Gitea repos available. No repo selected - the orchestrator will pick one from your prompt (GitHub).`;
+        info.textContent = `${repos.length} Gitea repos available. No repo selected - the orchestrator will pick one of them from your prompt.`;
       }
     }
 
