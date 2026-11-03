@@ -1,0 +1,20 @@
+# The server's act_runner for this repo (label claude-code-runner:host). Jobs run inside this container,
+# drive the host's Docker, and see APP_DIR (the deployed compose project) at the same path as the host.
+name: claude-code-runner-ci
+services:
+  runner:
+    build: .
+    restart: unless-stopped
+    # host networking: reaches the app on localhost for health checks, and needs no new Docker network
+    network_mode: host
+    user: "1000:1001" # martin:docker on the server
+    environment:
+      HOME: /data
+    working_dir: /data
+    entrypoint: ["act_runner"]
+    command: ["--config", "/config.yaml", "daemon"]
+    volumes:
+      - ./state:/data
+      - ./config.yaml:/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${APP_DIR:-/srv/claude-code-runner}:${APP_DIR:-/srv/claude-code-runner}

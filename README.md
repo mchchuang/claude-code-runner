@@ -158,6 +158,16 @@ The project publishes Docker images to Docker Hub with the following tagging str
 - **Version tags** (e.g., `1.4.1`): Internal release images created automatically on every push to `main` that triggers a semantic release. Use these for testing new features before they're promoted to latest.
 - **`latest` tag**: Stable release promoted manually via GitHub Actions. This is the recommended tag for production use.
 
+### This fork: Gitea CI/CD
+
+`.gitea/workflows/deploy.yml` runs on every push to `main` (and on demand from the Actions tab). It builds the image,
+pushes `:latest` and `:<commit sha>` to this Gitea's container registry, then runs `docker compose pull && up -d` in
+`APP_DIR` (default `/srv/claude-code-runner`, override with a repo variable) and waits for `/health`. Because
+`.gitea/workflows` exists, Gitea ignores the upstream `.github/workflows`.
+
+It runs on a self-hosted act_runner defined in `runner/` (label `claude-code-runner:host`). One-time setup on the server:
+copy `runner/` there, run `./register.sh <registration-token>`, then `docker compose up -d --build` in it.
+
 ## Integrations
 
 ### Clawdbot

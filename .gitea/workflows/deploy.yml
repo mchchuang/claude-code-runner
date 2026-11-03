@@ -1,0 +1,67 @@
+# Builds the image on every push to main (i.e. every merged pull request, and on demand from the Actions tab),
+# pushes it to this Gitea's container registry, then restarts the deployed copy on the server with it.
+#
+# Runs on the server's own act_runner (runner/ in this repo, label claude-code-runner:host): jobs run inside that
+# container, which drives the host's Docker and has APP_DIR (the deployed compose project) mounted.
+# APP_DIR's docker-compose.yml must use image ${REGISTRY}/${repository}:latest.
+#
+# Because .gitea/workflows exists, Gitea ignores the upstream .github/workflows (Docker Hub publishing).
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  BUILDKIT_PROGRESS: plain
+  COMPOSE_PROGRESS: plain
+
+jobs:
+  deploy:
+    runs-on: claude-code-runner
+    env:
+      # Override with a repository variable named APP_DIR if the deployment lives elsewhere.
+      APP_DIR: ${{ vars.APP_DIR || '/srv/claude-code-runner' }}
+    steps:
+      - name: Check out this commit
+        # Plain git with the job token, since the runner has no Node for actions/checkout. Host-mode workspaces
+        # persist between runs, so leftovers are cleaned.
+        run: |
+          git init -q .
+          git -c http.extraHeader="Authorization: token ${{ gitea.token }}" \
+            fetch -q "${{ gitea.server_url }}/${{ gitea.repository }}.git" "${{ gitea.ref }}"
+          git checkout -q -f --detach "${{ gitea.sha }}"
+          git clean -fdxq
+          git log -1 --oneline
+
+      - name: Build image
+        run: |
+          registry="${{ gitea.server_url }}"; registry="${registry#*://}"
+          image="$registry/$(echo '${{ gitea.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "REGISTRY=$registry" >> "$GITHUB_ENV"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker build --pull -t "$image:${{ gitea.sha }}" -t "$image:latest" .
+
+      - name: Push to the Gitea registry
+        # REGISTRY_TOKEN (a token with write:package) is only needed if the job token can't push packages.
+        run: |
+          echo '${{ secrets.REGISTRY_TOKEN || gitea.token }}' | docker login "$REGISTRY" -u '${{ gitea.actor }}' --password-stdin
+          docker push "$IMAGE:${{ gitea.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy
+        run: |
+          cd "$APP_DIR"
+          docker compose pull
+          docker compose up -d
+          docker image prune -f >/dev/null
+
+      - name: Check it's serving
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:7334/health && exit 0
+            sleep 2
+          done
+          echo "::error::Not healthy after 60s"; docker logs --tail 50 claude-code-runner; exit 1
