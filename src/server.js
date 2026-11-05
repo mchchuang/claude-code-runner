@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rm, appendFile, readFile, writeFile, access } from 'node:fs/promises';
 import { createWriteStream, createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { FileSessionStore, loadSessionSecret } from './session-store.js';
@@ -13,6 +14,7 @@ import { TaskStore } from './task-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execFileP = promisify(execFile);
 
 const app = express();
 app.use(express.json());
@@ -140,6 +142,10 @@ const tasks = new TaskStore(path.join(DATA_DIR, 'tasks.json'), { logFile: taskLo
 // Live `claude` processes by task id, so deleting a running task can stop it
 const procs = new Map();
 const TASK_TIMEOUT = 60 * 60 * 1000; // 1 hour
+// Optional spend cap per worker run, passed to `claude --max-budget-usd`
+const MAX_BUDGET_USD = Number(process.env.MAX_BUDGET_USD) > 0 ? String(Number(process.env.MAX_BUDGET_USD)) : null;
+// Picking and cloning a repo needs no big model
+const ORCHESTRATOR_MODEL = 'haiku';
 
 // ============ Gitea Integration ============
 
@@ -204,7 +210,8 @@ async function getGiteaRepo(fullName) {
 // Auto-detect mode: find which Gitea repo the orchestrator cloned, from its origin URL.
 async function resolveGiteaRepoFromClone(repoDir) {
   const origin = await new Promise((resolve, reject) =>
-    execFile('git', ['-C', repoDir, 'remote', 'get-url', 'origin'], (err, out) => err ? reject(err) : resolve(out.trim())));
+    // The configured URL, not `remote get-url`, which applies url.insteadOf rewrites
+    execFile('git', ['-C', repoDir, 'config', '--get', 'remote.origin.url'], (err, out) => err ? reject(err) : resolve(out.trim())));
   const strip = u => u.replace(/\.git$/, '').replace(/\/+$/, '');
   const fullName = strip(new URL(origin).pathname).split('/').filter(Boolean).slice(-2).join('/');
   const repo = await getGiteaRepo(fullName);
@@ -388,11 +395,13 @@ You are on branch ${branchName}. It's already pushed to origin.
 - Make reasonable assumptions, document them in commits
 - NEVER commit dependencies or build output (node_modules, venv, dist, etc.) - if the repo has no .gitignore covering them, add one before committing
 
+## Environment
+The repo is freshly cloned: dependencies are not installed. Install the tools and dependencies you need to build
+and test (npm install, pip install, go mod download, etc.) when you need them.
+
 ## Context Management
-Your context window is precious. DO NOT run more than 3-4 search commands yourself.
-- Use Task tool with subagent_type=Explore for any codebase exploration
-- Use Task tool for self-contained subtasks
-- Keep main thread for coordination and git operations
+Search and read files directly. Use a subagent only for a large, self-contained job (a wide search across a big
+codebase, an independent subtask) - each one starts from scratch and re-reads what it needs.
 
 ## Git Workflow
 Commit as a software engineer would - logical chunks of work, meaningful messages.
@@ -408,36 +417,11 @@ If blocked or failed: still push and create PR, note what went wrong in the PR b
 `.trim();
 }
 
-function getOrchestratorPrompt(prompt, workDir, branchName, repo) {
-  if (repo) {
-    return `
-You are an orchestrator. Your job is to clone a known repo, set up the environment,
-and create and push a feature branch.
-
-The target repository has already been selected: ${repo.full_name} (Gitea)
-Clone URL: ${repo.clone_url}
-Git credentials for ${GITEA_URL} are already configured - do not change git credential settings.
-
-Workflow:
-1. git clone ${repo.clone_url} ${workDir}/repo
-2. Examine the repo to identify required tools (check README, config files, lock files)
-3. Check what tools are already available, install anything missing
-4. Run dependency installation (npm install, pip install, go mod download, etc.)
-5. Create and push the feature branch:
-   git checkout -b ${branchName}
-   git commit --allow-empty -m "chore: start task"
-   git push -u origin HEAD
-6. Exit successfully
-
-Do NOT start working on the actual task - just prepare the environment.
-
-User request (for context only): ${prompt}
-`.trim();
-  }
+function getOrchestratorPrompt(prompt, workDir, branchName) {
   return `
 You are an orchestrator. Your job is to:
 1. Figure out which repo the user is asking about
-2. Clone it and set up the environment
+2. Clone it
 3. Create and push a feature branch
 
 Workflow:
@@ -449,16 +433,13 @@ ${giteaEnabled ? `1. Git credentials for ${GITEA_URL} are already configured - d
    git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
 2. Use gh CLI to list repos and identify the right one from the user's prompt
 3. Clone to ${workDir}/repo`}
-4. Examine the repo to identify required tools (check README, config files, lock files)
-5. Check what tools are already available, install anything missing
-6. Run dependency installation (npm install, pip install, go mod download, etc.)
-7. Create and push the feature branch:
-   git checkout -b ${branchName}
-   git commit --allow-empty -m "chore: start task"
-   git push -u origin HEAD
-8. Exit successfully
+4. Create and push the feature branch:
+   git -C ${workDir}/repo checkout -b ${branchName}
+   git -C ${workDir}/repo commit --allow-empty -m "chore: start task"
+   git -C ${workDir}/repo push -u origin HEAD
+5. Exit successfully
 
-Do NOT start working on the actual task - just prepare the environment.
+Do NOT install dependencies or start on the actual task - the next step does that.
 
 User request: ${prompt}
 `.trim();
@@ -504,19 +485,41 @@ app.post('/task', async (req, res) => {
     started: new Date().toISOString()
   });
 
-  runTask(id, prompt, taskDir, repo, model || null).catch(err => {
-    updateTask(id, {
-      status: 'failed',
-      error: err.message,
-      errorType: err.errorType || 'unknown',
-      finished: new Date().toISOString()
-    });
-  }).finally(() => {
-    // Deleted while running: the run may have written to the log after DELETE removed it
-    if (!tasks.has(id)) return rm(taskLog(id), { force: true }).catch(() => {});
-  });
+  track(id, runTask(id, prompt, taskDir, repo, model || null));
 
   res.json({ id, status: 'queued' });
+});
+
+// Resume a failed task's worker session in its kept clone, so the work already paid for isn't redone
+app.post('/task/:id/resume', async (req, res) => {
+  const { id } = req.params;
+  const task = tasks.get(id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  if (task.status !== 'failed' || !task.session_id) {
+    return res.status(409).json({ error: 'only a failed task whose worker started can be resumed' });
+  }
+  const repoDir = path.join(WORK_DIR, id, 'repo');
+  if (!existsSync(repoDir)) return res.status(409).json({ error: 'the clone is gone (lost on redeploy): rerun the task instead' });
+
+  // Claimed before the await below, so a second click can't start a second run
+  updateTask(id, { status: 'running', error: null, errorType: null, finished: null });
+  let repo = null;
+  if (task.repo && giteaEnabled) {
+    try {
+      repo = await getGiteaRepo(task.repo);
+    } catch (err) {
+      updateTask(id, { status: task.status, error: task.error, errorType: task.errorType, finished: task.finished });
+      return res.status(502).json({ error: `Could not load repo ${task.repo}: ${err.message}` });
+    }
+  }
+
+  track(id, (async () => {
+    const logFile = taskLog(id);
+    await appendFile(logFile, `\n=== WORKER PHASE ===\n`);
+    await runWorker(id, RESUME_PROMPT, repoDir, `claude/${id}`, logFile, repo, task.model, task.session_id);
+    await appendFile(logFile, `\n=== WORKER COMPLETE ===\n`);
+  })());
+  res.json({ id, status: 'running' });
 });
 
 app.get('/task/:id', (req, res) => {
@@ -609,6 +612,23 @@ function updateTask(id, patch) {
   if (task) tasks.set(id, { ...task, ...patch });
 }
 
+// A task run in the background: a failure fails the task
+function track(id, run) {
+  run.catch(err => {
+    updateTask(id, {
+      status: 'failed',
+      error: err.message,
+      errorType: err.errorType || 'unknown',
+      finished: new Date().toISOString()
+    });
+  }).finally(() => {
+    // Deleted while running: the run may have written to the log after DELETE removed it
+    if (!tasks.has(id)) return rm(taskLog(id), { force: true }).catch(() => {});
+  });
+}
+
+const RESUME_PROMPT = 'You were stopped before finishing. Continue the task where you left off, then do the final steps: commit, push and open the pull request.';
+
 async function runTask(id, prompt, taskDir, repo, model) {
   const logFile = taskLog(id);
   const repoDir = path.join(taskDir, 'repo');
@@ -619,9 +639,10 @@ async function runTask(id, prompt, taskDir, repo, model) {
   if (repo) await appendFile(logFile, `Repo: ${repo.full_name}\n`);
   await appendFile(logFile, `Prompt: ${prompt}\n\n`);
 
-  // Phase 1: Orchestrator - identify and clone repo
+  // Phase 1: set up the clone and branch. A picked repo needs no Claude; auto-detect asks a small model to find it.
   await appendFile(logFile, `\n=== ORCHESTRATOR PHASE ===\n`);
-  await runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, model);
+  if (repo) await setUpRepo(id, repo, repoDir, branchName, logFile);
+  else await runOrchestrator(id, prompt, taskDir, branchName, logFile);
   await appendFile(logFile, `\n=== ORCHESTRATOR COMPLETE ===\n\n`);
 
   if (!repo && giteaEnabled) {
@@ -646,16 +667,37 @@ async function runTask(id, prompt, taskDir, repo, model) {
   return result;
 }
 
-async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, model) {
+// Clone a known repo and push the task branch, with plain git
+async function setUpRepo(id, repo, repoDir, branchName, logFile) {
+  const ac = new AbortController();
+  const handle = { kill: () => ac.abort() };
+  procs.set(id, handle);
+  const git = async (...args) => {
+    await appendFile(logFile, `$ git ${args.join(' ')}\n`);
+    await execFileP('git', args, { signal: ac.signal, timeout: 10 * 60 * 1000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  };
+  try {
+    await git('clone', '-q', repo.clone_url, repoDir);
+    await git('-C', repoDir, 'checkout', '-q', '-b', branchName);
+    await git('-C', repoDir, 'commit', '-q', '--allow-empty', '-m', 'chore: start task');
+    await git('-C', repoDir, 'push', '-q', '-u', 'origin', 'HEAD');
+  } catch (err) {
+    throw Object.assign(new Error(`Setup failed: ${err.stderr?.trim() || err.message}`), { errorType: 'setup_failed' });
+  } finally {
+    if (procs.get(id) === handle) procs.delete(id);
+  }
+}
+
+async function runOrchestrator(id, prompt, taskDir, branchName, logFile) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
   logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
-  const fullPrompt = getOrchestratorPrompt(prompt, taskDir, branchName, repo);
+  const fullPrompt = getOrchestratorPrompt(prompt, taskDir, branchName);
 
   return new Promise((resolve, reject) => {
     const proc = pty.spawn('claude', [
       '-p', fullPrompt,
       '--output-format', 'stream-json',
-      ...(model ? ['--model', model] : []),
+      '--model', ORCHESTRATOR_MODEL,
       '--verbose',
       '--dangerously-skip-permissions'
     ], {
@@ -673,7 +715,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, m
       const err = new Error('Orchestrator timed out');
       err.errorType = 'timeout';
       reject(err);
-    }, 20 * 60 * 1000); // 20 min timeout for orchestrator (includes env setup)
+    }, 20 * 60 * 1000);
 
     procs.set(id, proc);
     console.log(`[${id}] Orchestrator PTY spawned, pid: ${proc.pid}`);
@@ -695,7 +737,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, m
   });
 }
 
-async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model) {
+async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model, resumeSessionId) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
   logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
   const systemPrompt = getWorkerSystemPrompt(branchName, repo);
@@ -703,9 +745,12 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model) 
   return new Promise((resolve, reject) => {
     const proc = pty.spawn('claude', [
       '-p', prompt,
-      '--system-prompt', systemPrompt,
+      ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
+      // Appended to Claude Code's own prompt, not replacing it: its tool guidance keeps runs short
+      '--append-system-prompt', systemPrompt,
       '--output-format', 'stream-json',
       ...(model ? ['--model', model] : []),
+      ...(MAX_BUDGET_USD ? ['--max-budget-usd', MAX_BUDGET_USD] : []),
       '--verbose',
       '--dangerously-skip-permissions'
     ], {
@@ -730,9 +775,15 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model) 
     procs.set(id, proc);
     console.log(`[${id}] Worker PTY spawned in ${repoDir}, pid: ${proc.pid}`);
 
+    // The init event's session id, saved as soon as it's printed so a run that dies or times out can be resumed
+    let sessionId = null;
     proc.onData(data => {
       output += data;
       logStream.write(data);
+      if (!sessionId) {
+        sessionId = output.match(/"session_id":"([\w-]+)"/)?.[1] || null;
+        if (sessionId) updateTask(id, { session_id: sessionId });
+      }
     });
 
     proc.onExit(async ({ exitCode }) => {
@@ -749,20 +800,24 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model) 
       const prUrls = output.match(prPattern) || [];
       const prMatch = prUrls.length ? [prUrls[prUrls.length - 1]] : null;
 
+      const overBudget = output.includes('"subtype":"error_max_budget_usd"');
+      const ok = exitCode === 0 && !overBudget;
+      const errorType = ok ? null : overBudget ? 'budget_exceeded' : 'exit_code';
       updateTask(id, {
-        status: exitCode === 0 ? 'completed' : 'failed',
-        pr_url: prMatch?.[0] || null,
-        errorType: exitCode === 0 ? null : 'exit_code',
+        status: ok ? 'completed' : 'failed',
+        pr_url: prMatch?.[0] || tasks.get(id)?.pr_url || null,
+        errorType,
         finished: new Date().toISOString()
       });
 
-      // Cleanup cloned repo on success (keep logs)
-      if (exitCode === 0 && tasks.has(id)) {
+      // Cleanup cloned repo on success (keep logs); a failed run keeps it for resume
+      if (ok && tasks.has(id)) {
         await rm(repoDir, { recursive: true, force: true }).catch(() => {});
       }
 
-      // errorType on the error too: runTask's catch overwrites the task with it
-      exitCode === 0 ? resolve() : reject(Object.assign(new Error(`Worker exited with code ${exitCode}`), { errorType: 'exit_code' }));
+      // errorType on the error too: the task's catch overwrites the task with it
+      const message = overBudget ? `Worker hit the $${MAX_BUDGET_USD} budget` : `Worker exited with code ${exitCode}`;
+      ok ? resolve() : reject(Object.assign(new Error(message), { errorType }));
     });
   });
 }

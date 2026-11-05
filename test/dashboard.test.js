@@ -288,6 +288,9 @@ describe('parseLog', async () => {
     assert.equal(bad(`=== WORKER PHASE ===\n${j({ type: 'result', subtype: 'success', is_error: true })}`), true);
     assert.equal(bad(`=== WORKER PHASE ===\n${j({ type: 'result' })}`), false);
     assert.equal(p.run(`parseLog('').length`), 0);
+    // A resumed task logs a second WORKER phase: its COMPLETE marks that one, not the failed first run
+    const resumed = JSON.parse(p.run(`JSON.stringify(parseLog('=== WORKER PHASE ===\\n=== WORKER PHASE ===\\n=== WORKER COMPLETE ==='))`));
+    assert.deepEqual(resumed.map(x => [x.key, x.done]), [['WORKER', false], ['WORKER', true]]);
     assert.equal(p.run(`parseLog('only a header\\n{"type":"assistant"}').length`), 0);
     p.close();
   });
@@ -599,6 +602,48 @@ describe('task actions menu', () => {
     p.close();
   });
 
+  test('a failed task whose worker started offers Resume; others do not', async () => {
+    const p = await boot({
+      routes: {
+        '/tasks': [
+          task({ id: 'r1', status: 'failed', errorType: 'exit_code', session_id: 's-1' }),
+          task({ id: 'r2', status: 'failed', errorType: 'exit_code' }),
+          task({ id: 'r3', status: 'failed', errorType: 'interrupted', session_id: 's-3' }),
+          task({ id: 'r4', session_id: 's-4' })
+        ]
+      }
+    });
+    more(p, 'r1').click();
+    assert.deepEqual(items(p), ['Resume', 'Archive', 'Delete…']);
+    for (const id of ['r2', 'r3', 'r4']) {
+      more(p, id).click();
+      assert.deepEqual(items(p), ['Archive', 'Delete…'], id);
+    }
+    p.close();
+  });
+
+  test('resuming posts to the task, then refreshes the list; errors are reported', async () => {
+    const tasks = [task({ id: 'r1', status: 'failed', errorType: 'exit_code', session_id: 's-1' }), task({ id: 'r2', status: 'failed', errorType: 'budget_exceeded', session_id: 's-2' })];
+    const p = await boot({
+      routes: {
+        '/tasks': () => tasks,
+        'POST /task/r1/resume': () => { Object.assign(tasks[0], { status: 'running', errorType: null }); return { status: 200, body: { id: 'r1', status: 'running' } }; },
+        'POST /task/r2/resume': { status: 409, body: { error: 'the clone is gone (lost on redeploy): rerun the task instead' } }
+      }
+    });
+    more(p, 'r1').click();
+    menu(p).querySelector('[data-action="resume"]').click();
+    await settle();
+    assert.ok(menu(p).hidden);
+    assert.ok(p.calls.some(c => c.method === 'POST' && c.path === '/task/r1/resume'));
+    assert.match(p.text('counts'), /1 running/);
+    more(p, 'r2').click();
+    menu(p).querySelector('[data-action="resume"]').click();
+    await settle();
+    assert.deepEqual(p.alerts, ["Couldn't resume the task: the clone is gone (lost on redeploy): rerun the task instead"]);
+    p.close();
+  });
+
   test('a task already gone on the server is still removed; other delete errors are reported', async () => {
     const p = await boot({
       routes: {
@@ -711,14 +756,29 @@ describe('task detail', () => {
     p.close();
   });
 
+  test('a resumable failure points to Resume; budget and setup failures explain themselves', async () => {
+    const p = await boot({ routes: { '/tasks': [task({ status: 'failed', errorType: 'budget_exceeded', session_id: 's-1' })], '/task/abc12345/logs': LOG } });
+    p.run(`selectTask('abc12345')`);
+    await settle();
+    let problem = p.$('detail-head').querySelector('.problem').textContent;
+    assert.match(problem, /spending cap \(MAX_BUDGET_USD\)/);
+    assert.match(problem, /Resume it from the … menu/);
+    p.run(`Object.assign(tasks[0], { errorType: 'setup_failed', session_id: undefined }); renderHeader()`);
+    problem = p.$('detail-head').querySelector('.problem').textContent;
+    assert.match(problem, /couldn't clone the repo/);
+    assert.doesNotMatch(problem, /Resume/);
+    p.close();
+  });
+
   test('a task cut short by a restart explains what happened', async () => {
-    const t = task({ status: 'failed', errorType: 'interrupted', error: 'The runner restarted while this task was running.' });
+    const t = task({ status: 'failed', errorType: 'interrupted', session_id: 's-1', error: 'The runner restarted while this task was running.' });
     const p = await boot({ routes: { '/tasks': [t], '/task/abc12345/logs': LOG } });
     p.run(`selectTask('abc12345')`);
     await settle();
     const problem = p.$('detail-head').querySelector('.problem').textContent;
     assert.match(problem, /runner restarted \(for example a redeploy\)/);
     assert.doesNotMatch(problem, /The task failed\./);
+    assert.doesNotMatch(problem, /Resume/, 'its clone is gone after a redeploy');
     p.close();
   });
 

@@ -10,6 +10,7 @@ services:
       - GITEA_URL=${GITEA_URL:-}
       - GITEA_TOKEN=${GITEA_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MAX_BUDGET_USD=${MAX_BUDGET_USD:-}
       - PORT=3000
     volumes:
       # Mount only OAuth credentials, not the entire ~/.claude directory

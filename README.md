@@ -27,17 +27,13 @@ Claude Code uses your authenticated session from your OS (no API key). Claude Co
 
 ## Architecture
 
-The system uses a two-stage LLM architecture:
+The system runs a setup step, then a Worker Claude:
 
-### Orchestrator 
+### Setup (orchestrator)
 
-The first Claude instance receives your prompt and is responsible for:
-- Parsing your task to identify which repository you're referring to
-- Searching your GitHub repos via the `gh` CLI
-- Cloning the target repository and setting up the environment
-- Spawning a Worker Claude inside the cloned repo
-
-The orchestrator handles all the setup so the worker can focus purely on coding.
+When you pick a repo, the runner clones it and pushes the task branch itself, with plain git: no Claude, no tokens.
+On auto-detect, a small orchestrator Claude (Haiku) finds the repository your prompt means (Gitea API or the
+`gh` CLI), clones it and pushes the branch. It installs nothing: the worker installs what it needs.
 
 ### Worker 
 
@@ -45,7 +41,8 @@ A second Claude instance runs inside the cloned repository and:
 - Picks up the repo's existing `.claude/`, `.mcp.json`, and skills
 - Opens a draft PR immediately so you can watch progress
 - Commits and pushes after every logical change (no batching)
-- Spawns subagents for complex tasks to preserve context
+- Installs the dependencies it needs to build and test
+- Uses subagents only for large, self-contained jobs (each one re-reads what it needs, so they cost tokens)
 - On failure: commits current state, updates PR with blockers, then exits cleanly
 
 ## Dashboard
@@ -63,7 +60,7 @@ Log view, watch real time updates of task runners.
 This fork can target repos hosted on a Gitea instance. Set `GITEA_URL` and `GITEA_TOKEN`
 and the dashboard shows a filterable dropdown of every repo the token's user can access
 (own, collaborator and org repos). Pick one before submitting and the task runs against
-that exact repo: the orchestrator clones it directly (no guessing from the prompt) and the
+that exact repo: the runner clones it directly (no guessing from the prompt, no Claude call) and the
 worker opens its PR on Gitea via the API. Leave the dropdown on "Auto-detect" and the
 orchestrator picks a Gitea repo from your prompt instead. Without `GITEA_URL`/`GITEA_TOKEN`,
 auto-detect uses the original GitHub behaviour.
@@ -90,6 +87,7 @@ services:
       - GITEA_TOKEN=${GITEA_TOKEN}
       - PORT=3000
       - SESSION_SECRET=${SESSION_SECRET}  # Optional: generated and kept in /data if unset
+      - MAX_BUDGET_USD=${MAX_BUDGET_USD}  # Optional: stop a worker run after this many dollars
     volumes:
       - ~/.claude/.credentials.json:/home/node/.claude/.credentials.json:ro
       - claude-data:/data  # Persistent auth credentials, API tokens and login sessions

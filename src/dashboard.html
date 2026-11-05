@@ -626,6 +626,9 @@
 
     // ============ Task actions (archive, delete) ============
 
+    // A failed task whose worker started can continue its session; after a redeploy its clone is gone
+    const canResume = t => t.status === 'failed' && !!t.session_id && t.errorType !== 'interrupted';
+
     function openTaskMenu(e, id) {
       e.stopPropagation();
       if (menuTaskId === id) return closeTaskMenu();
@@ -634,7 +637,8 @@
       closeTaskMenu();
       menuTaskId = id;
       const menu = $('task-menu');
-      menu.innerHTML = `
+      menu.innerHTML = (canResume(t)
+        ? `<button role="menuitem" data-action="resume" onclick="resumeTask('${esc(id)}')">Resume</button>` : '') + `
         <button role="menuitem" data-action="archive" onclick="setArchived('${esc(id)}', ${!t.archived})">${t.archived ? 'Unarchive' : 'Archive'}</button>
         <button role="menuitem" data-action="delete" class="danger" onclick="deleteTask('${esc(id)}')">Delete&hellip;</button>`;
       menu.hidden = false;
@@ -671,6 +675,18 @@
         if (id === selectedId) renderHeader();
       } catch (e) {
         alert(`Couldn't ${archived ? 'archive' : 'unarchive'} the task: ${e.message}`);
+      }
+    }
+
+    // Continue a failed task's Claude session where it stopped, in its kept clone
+    async function resumeTask(id) {
+      closeTaskMenu();
+      try {
+        const res = await api('/task/' + encodeURIComponent(id) + '/resume', { method: 'POST' });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'HTTP ' + res.status);
+        await fetchTasks();
+      } catch (e) {
+        alert('Couldn\'t resume the task: ' + e.message);
       }
     }
 
@@ -724,6 +740,8 @@
       capacity_reached: 'Claude hit its usage limit. Try again later.',
       timeout: 'The task ran longer than 1 hour and was stopped.',
       exit_code: 'Claude stopped with an error. The run below shows the last steps.',
+      budget_exceeded: 'The task reached its spending cap (MAX_BUDGET_USD) and was stopped.',
+      setup_failed: 'The runner couldn\'t clone the repo or push the task branch. Check the repo exists and the Gitea token can push to it.',
       interrupted: 'The runner restarted (for example a redeploy) while this task was running, so it was stopped. Check its branch for pushed work, or rerun it.'
     };
 
@@ -757,6 +775,7 @@
         </div>
         ${t.status === 'failed' ? `<div class="problem">
           <p>${esc(ERROR_HELP[t.errorType] || 'The task failed.')}</p>
+          ${canResume(t) ? '<p>Resume it from the … menu to continue where it stopped.</p>' : ''}
           ${t.error ? `<p>${esc(t.error)}</p>` : ''}
         </div>` : ''}`;
     }
@@ -764,7 +783,7 @@
     // ============ Run timeline (parsed from the stream-json log) ============
 
     const PHASES = {
-      ORCHESTRATOR: { title: 'Set up', what: 'Find the repo, clone it, install tools, create the branch' },
+      ORCHESTRATOR: { title: 'Set up', what: 'Find the repo, clone it, create the branch' },
       WORKER: { title: 'Work', what: 'Make the change, commit, push and open a pull request' }
     };
 
@@ -793,7 +812,7 @@
         if (!line) continue;
         let m;
         if ((m = line.match(/^=== (\w+) PHASE ===$/))) { cur = { key: m[1], items: [], done: false }; phases.push(cur); continue; }
-        if ((m = line.match(/^=== (\w+) COMPLETE ===$/))) { const p = phases.find(p => p.key === m[1]); if (p) p.done = true; continue; }
+        if ((m = line.match(/^=== (\w+) COMPLETE ===$/))) { const p = phases.findLast(p => p.key === m[1]); if (p) p.done = true; continue; }
         if (!cur) continue; // task header (ID / Repo / Prompt) is already shown above the timeline
         if (line[0] !== '{') { cur.items.push({ kind: 'note', text: line }); continue; }
         let d;
