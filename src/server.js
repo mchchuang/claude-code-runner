@@ -466,10 +466,14 @@ User request: ${prompt}
 
 
 app.post('/task', async (req, res) => {
-  const { prompt, repo: repoName } = req.body;
+  const { prompt, repo: repoName, model } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: 'prompt required' });
+  }
+
+  if (model !== undefined && model !== null && model !== '' && !(typeof model === 'string' && /^[\w.[\]-]{1,64}$/.test(model))) {
+    return res.status(400).json({ error: 'invalid model' });
   }
 
   let repo = null;
@@ -496,10 +500,11 @@ app.post('/task', async (req, res) => {
     prompt,
     repo: repo?.full_name || null,
     repo_url: repo?.html_url || null,
+    model: model || null,
     started: new Date().toISOString()
   });
 
-  runTask(id, prompt, taskDir, repo).catch(err => {
+  runTask(id, prompt, taskDir, repo, model || null).catch(err => {
     updateTask(id, {
       status: 'failed',
       error: err.message,
@@ -604,7 +609,7 @@ function updateTask(id, patch) {
   if (task) tasks.set(id, { ...task, ...patch });
 }
 
-async function runTask(id, prompt, taskDir, repo) {
+async function runTask(id, prompt, taskDir, repo, model) {
   const logFile = taskLog(id);
   const repoDir = path.join(taskDir, 'repo');
   const branchName = `claude/${id}`;
@@ -616,7 +621,7 @@ async function runTask(id, prompt, taskDir, repo) {
 
   // Phase 1: Orchestrator - identify and clone repo
   await appendFile(logFile, `\n=== ORCHESTRATOR PHASE ===\n`);
-  await runOrchestrator(id, prompt, taskDir, branchName, logFile, repo);
+  await runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, model);
   await appendFile(logFile, `\n=== ORCHESTRATOR COMPLETE ===\n\n`);
 
   if (!repo && giteaEnabled) {
@@ -635,13 +640,13 @@ async function runTask(id, prompt, taskDir, repo) {
 
   // Phase 2: Worker - run in cloned repo
   await appendFile(logFile, `=== WORKER PHASE ===\n`);
-  const result = await runWorker(id, prompt, repoDir, branchName, logFile, repo);
+  const result = await runWorker(id, prompt, repoDir, branchName, logFile, repo, model);
   await appendFile(logFile, `\n=== WORKER COMPLETE ===\n`);
 
   return result;
 }
 
-async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
+async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo, model) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
   logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
   const fullPrompt = getOrchestratorPrompt(prompt, taskDir, branchName, repo);
@@ -650,6 +655,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
     const proc = pty.spawn('claude', [
       '-p', fullPrompt,
       '--output-format', 'stream-json',
+      ...(model ? ['--model', model] : []),
       '--verbose',
       '--dangerously-skip-permissions'
     ], {
@@ -689,7 +695,7 @@ async function runOrchestrator(id, prompt, taskDir, branchName, logFile, repo) {
   });
 }
 
-async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
+async function runWorker(id, prompt, repoDir, branchName, logFile, repo, model) {
   const logStream = createWriteStream(logFile, { flags: 'a' });
   logStream.on('error', () => {}); // the task (and its log) may be deleted mid-run
   const systemPrompt = getWorkerSystemPrompt(branchName, repo);
@@ -699,6 +705,7 @@ async function runWorker(id, prompt, repoDir, branchName, logFile, repo) {
       '-p', prompt,
       '--system-prompt', systemPrompt,
       '--output-format', 'stream-json',
+      ...(model ? ['--model', model] : []),
       '--verbose',
       '--dangerously-skip-permissions'
     ], {

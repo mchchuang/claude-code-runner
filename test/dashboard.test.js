@@ -802,7 +802,7 @@ describe('composer', () => {
     assert.equal(p.$('prompt').value, '');
     assert.equal(p.window.location.hash, '#new1');
     assert.equal(p.$('submit-btn').disabled, false);
-    assert.equal(p.$('submit-btn').textContent, 'Run task');
+    assert.equal(p.$('submit-btn').title, 'Run task (Ctrl+Enter)');
     p.close();
   });
 

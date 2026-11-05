@@ -131,6 +131,17 @@
     }
     .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     textarea.field { height: auto; min-height: 96px; padding: 9px 10px; resize: vertical; line-height: 1.5; }
+    .composer-box { position: relative; }
+    .composer-box textarea.field { padding-bottom: 44px; display: block; }
+    .composer-box .model-select {
+      position: absolute; left: 8px; bottom: 8px; height: 28px; width: auto; max-width: 55%;
+      padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer;
+    }
+    .composer-box .model-select:hover { background: var(--sunken); }
+    .composer-box .send {
+      position: absolute; right: 8px; bottom: 8px; width: 30px; height: 28px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
     .composer-foot { display: flex; align-items: center; gap: 10px; }
     .hint { color: var(--muted); font-size: 12.5px; flex: 1; min-width: 0; }
     .hint.error { color: var(--fail); }
@@ -342,10 +353,18 @@
           </div>
           <button type="button" class="btn quiet" onclick="fetchRepos(true)" title="Reload repos" aria-label="Reload repos">&#x21bb;</button>
         </div>
-        <textarea class="field" id="prompt" placeholder="Describe the change you want" aria-label="Task"></textarea>
+        <div class="composer-box">
+          <textarea class="field" id="prompt" placeholder="Describe the change you want" aria-label="Task"></textarea>
+          <select class="model-select" id="model" aria-label="Model" title="Model">
+            <option value="">Default model</option>
+            <option value="opus">Opus</option>
+            <option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option>
+          </select>
+          <button class="btn primary send" id="submit-btn" type="submit" title="Run task (Ctrl+Enter)" aria-label="Run task">&#x21b5;</button>
+        </div>
         <div class="composer-foot">
           <span class="hint" id="repo-hint"></span>
-          <button class="btn primary" id="submit-btn" type="submit" title="Ctrl+Enter">Run task</button>
         </div>
       </form>
       <nav class="list" id="tasks" aria-label="Tasks"></nav>
@@ -872,6 +891,8 @@
       e?.preventDefault();
       const prompt = $('prompt').value.trim();
       const repo = $('repo').value.trim();
+      const model = $('model').value;
+      store.set('model', model);
       if (!prompt) return $('prompt').focus();
       if (repo && reposEnabled && !repos.some(r => r.full_name === repo)) {
         setHint(`${esc(repo)} isn't one of your Gitea repos. Pick one from the list, or clear the field.`, true);
@@ -879,9 +900,9 @@
       }
       const btn = $('submit-btn');
       btn.disabled = true;
-      btn.textContent = 'Starting…';
+      btn.title = 'Starting…';
       try {
-        const res = await api('/task', { method: 'POST', body: JSON.stringify(repo ? { prompt, repo } : { prompt }) });
+        const res = await api('/task', { method: 'POST', body: JSON.stringify({ prompt, ...(repo && { repo }), ...(model && { model }) }) });
         const data = await res.json();
         if (!data.id) throw new Error(data.error || 'The runner didn\'t start the task.');
         $('prompt').value = '';
@@ -891,7 +912,7 @@
         setHint('Couldn\'t start the task: ' + esc(err.message), true);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Run task';
+        btn.title = 'Run task (Ctrl+Enter)';
       }
     }
 
@@ -1147,6 +1168,7 @@
     });
 
     fetchCurrentUser();
+    if ([...$('model').options].some(o => o.value === store.get('model'))) $('model').value = store.get('model');
     fetchRepos();
     fetchTasks().then(() => {
       const id = location.hash.slice(1);

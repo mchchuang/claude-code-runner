@@ -12,7 +12,7 @@ const prompt = arg('-p');
 const systemPrompt = args.includes('--system-prompt') ? arg('--system-prompt') : null;
 const emit = obj => console.log(JSON.stringify(obj));
 
-emit({ type: 'system', subtype: 'init', model: 'fake-claude', tools: [], mcp_servers: [] });
+emit({ type: 'system', subtype: 'init', model: args.includes('--model') ? arg('--model') : 'fake-claude', tools: [], mcp_servers: [] });
 
 if (systemPrompt === null) {
   // Orchestrator: "clone" the repo by creating it with the right origin, like `git clone` would

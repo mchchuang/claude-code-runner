@@ -268,6 +268,14 @@ describe('without Gitea configured', () => {
     assert.deepEqual((await runner.request('GET', '/api/repos')).json, { enabled: false, repos: [] });
   });
 
+  test('rejects a malformed model', async () => {
+    for (const model of ['a b', '--x; rm', 5, 'x'.repeat(65)]) {
+      const res = await runner.request('POST', '/task', { body: { prompt: 'x', model } });
+      assert.equal(res.status, 400, String(model));
+      assert.match(res.json.error, /invalid model/);
+    }
+  });
+
   test('a task needs a prompt, and picking a repo needs Gitea', async () => {
     assert.equal((await runner.request('POST', '/task', { body: {} })).status, 400);
     assert.equal((await runner.request('POST', '/task', { body: { prompt: '' } })).status, 400);
